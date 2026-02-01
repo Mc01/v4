@@ -41,125 +41,136 @@ from .scenarios import (
 # =============================================================================
 
 def run_comparison(codenames: list[str]):
-    """Run all scenarios for each model and print comprehensive comparison table."""
+    """Run all scenarios for each model and print transposed comparison table.
+    
+    Transposed layout: Scenarios as rows, Models as columns.
+    This format is optimized for many scenarios with fewer models.
+    """
     C = Color
-    all_results = []
     
     print(f"\n{C.DIM}Running scenarios...{C.END}", end="", flush=True)
     
+    # Collect results for each model
+    model_results = {}
     for code in codenames:
-        single_r = single_user_scenario(code, verbose=False)
-        multi_r = multi_user_scenario(code, verbose=False)
-        bank_r = bank_run_scenario(code, verbose=False)
-        rmulti_r = reverse_multi_user_scenario(code, verbose=False)
-        rbank_r = reverse_bank_run_scenario(code, verbose=False)
-        all_results.append({
-            "codename": code,
-            "single": single_r,
-            "multi": multi_r,
-            "bank": bank_r,
-            "rmulti": rmulti_r,
-            "rbank": rbank_r,
-        })
+        model_results[code] = {
+            "single": single_user_scenario(code, verbose=False),
+            "multi": multi_user_scenario(code, verbose=False),
+            "bank": bank_run_scenario(code, verbose=False),
+            "rmulti": reverse_multi_user_scenario(code, verbose=False),
+            "rbank": reverse_bank_run_scenario(code, verbose=False),
+        }
     
     print(f"\r{' ' * 30}\r", end="")  # Clear loading message
     
-    # Header
+    # Curve abbreviations
     curve_abbr = {"Constant Product": "CP", "Exponential": "Exp", "Sigmoid": "Sig", "Logarithmic": "Log"}
     
+    # Helper formatters
+    def fmt_profit(val, width=7, decimals=0):
+        """Format value with color: green positive, red negative."""
+        v = float(val)
+        fmt = f">{width}.{decimals}f"
+        if v > 0:
+            return f"{C.GREEN}{v:{fmt}}{C.END}"
+        elif v < 0:
+            return f"{C.RED}{v:{fmt}}{C.END}"
+        return f"{v:{fmt}}"
+    
+    def fmt_losers(n, width=2):
+        """Format loser count: red if > 0."""
+        if n > 0:
+            return f"{C.RED}{n:>{width}d}{C.END}"
+        return f"{n:>{width}d}"
+    
+    def fmt_vault(val, width=5):
+        """Format vault: yellow if != 0."""
+        rounded = round(val, 2)
+        if rounded != D(0):
+            return f"{C.YELLOW}{float(val):>{width}.0f}{C.END}"
+        return f"{float(val):>{width}.0f}"
+    
+    # Header
     print()
-    print(f"{C.BOLD}{C.HEADER}{'='*40}{C.END}")
-    print(f"{C.BOLD}{C.HEADER}  MODEL COMPARISON - FIFO vs LIFO{C.END}")
-    print(f"{C.BOLD}{C.HEADER}{'='*40}{C.END}")
+    print(f"{C.BOLD}{C.HEADER}{'='*60}{C.END}")
+    print(f"{C.BOLD}{C.HEADER}  MODEL COMPARISON - FIFO vs LIFO {C.END}")
+    print(f"{C.BOLD}{C.HEADER}{'='*60}{C.END}")
     print()
     
-    # Column headers
-    hdr = (f"  {'Model':6s} {'Crv':4s} │ {'S':>6s} │ "
-           f"{'M+':>6s} {'M-':>6s} {'#':>2s} {'V':>5s} │ "
-           f"{'B+':>6s} {'B-':>7s} {'#':>2s} {'V':>5s} │ "
-           f"{'RM+':>6s} {'RM-':>6s} {'#':>2s} {'V':>5s} │ "
-           f"{'RB+':>6s} {'RB-':>7s} {'#':>2s} {'V':>5s}")
-    print(hdr)
-    sep = (f"  {'──────':6s} {'───':4s} │ {'──────':>6s} │ "
-           f"{'──────':>6s} {'──────':>6s} {'──':>2s} {'─────':>5s} │ "
-           f"{'──────':>6s} {'───────':>7s} {'──':>2s} {'─────':>5s} │ "
-           f"{'──────':>6s} {'──────':>6s} {'──':>2s} {'─────':>5s} │ "
-           f"{'──────':>6s} {'───────':>7s} {'──':>2s} {'─────':>5s}")
-    print(sep)
-    
-    for r in all_results:
-        code = r["codename"]
+    # Build model column headers with curve type
+    model_hdrs = []
+    for code in codenames:
         cfg = MODELS[code]
         curve = curve_abbr.get(CURVE_NAMES[cfg["curve"]], "?")
-        
-        # Single
-        s_profit = r["single"]["profit"]
-        
-        # Multi (FIFO)
-        m_profits = list(r["multi"]["profits"].values())
-        m_winners = sum(D(1) for p in m_profits if p > 0)
-        m_losers = len(m_profits) - int(m_winners)
-        m_plus = sum(p for p in m_profits if p > 0)
-        m_minus = sum(p for p in m_profits if p < 0)
-        m_vault = r["multi"]["vault"]
-        
-        # Bank (FIFO)
-        b_plus = sum(p for p in r["bank"]["profits"].values() if p > 0)
-        b_minus = sum(p for p in r["bank"]["profits"].values() if p < 0)
-        b_losers = r["bank"]["losers"]
-        b_vault = r["bank"]["vault"]
-        
-        # Reverse Multi (LIFO)
-        rm_profits = list(r["rmulti"]["profits"].values())
-        rm_plus = sum(p for p in rm_profits if p > 0)
-        rm_minus = sum(p for p in rm_profits if p < 0)
-        rm_losers = sum(1 for p in rm_profits if p <= 0)
-        rm_vault = r["rmulti"]["vault"]
-        
-        # Reverse Bank (LIFO)
-        rb_plus = sum(p for p in r["rbank"]["profits"].values() if p > 0)
-        rb_minus = sum(p for p in r["rbank"]["profits"].values() if p < 0)
-        rb_losers = r["rbank"]["losers"]
-        rb_vault = r["rbank"]["vault"]
-        
-        # Format row with colors
-        def fmt_profit(val, width=6, decimals=0):
-            """Format value with color: green positive, red negative."""
-            v = float(val)
-            fmt = f">{width}.{decimals}f"
-            if v > 0:
-                return f"{C.GREEN}{v:{fmt}}{C.END}"
-            elif v < 0:
-                return f"{C.RED}{v:{fmt}}{C.END}"
-            return f"{v:{fmt}}"
-        
-        def fmt_losers(n, width=2):
-            """Format loser count: red if > 0."""
-            if n > 0:
-                return f"{C.RED}{n:>{width}d}{C.END}"
-            return f"{n:>{width}d}"
-        
-        def fmt_vault(val, width=5):
-            """Format vault: yellow if != 0 (rounded to avoid tiny residuals)."""
-            rounded = round(val, 2)
-            if rounded != D(0):
-                return f"{C.YELLOW}{float(val):>{width}.0f}{C.END}"
-            return f"{float(val):>{width}.0f}"
-        
-        # Single profit
-        s_col = fmt_profit(s_profit, 6, 1)
-        
-        row = (f"  {code:6s} {curve:4s} │ {s_col} │ "
-               f"{fmt_profit(m_plus)} {fmt_profit(m_minus)} {fmt_losers(m_losers)} {fmt_vault(m_vault)} │ "
-               f"{fmt_profit(b_plus)} {fmt_profit(b_minus, 7)} {fmt_losers(b_losers)} {fmt_vault(b_vault)} │ "
-               f"{fmt_profit(rm_plus)} {fmt_profit(rm_minus)} {fmt_losers(rm_losers)} {fmt_vault(rm_vault)} │ "
-               f"{fmt_profit(rb_plus)} {fmt_profit(rb_minus, 7)} {fmt_losers(rb_losers)} {fmt_vault(rb_vault)}")
+        model_hdrs.append(f"{code}({curve})")
+    
+    # Sub-columns: +(5) -(5) #(2) V(4)
+    GAIN_W, LOSS_W, NUM_W, VLT_W = 5, 5, 2, 4
+    CELL_W = 24
+    
+    # Print header row (model names)
+    hdr = f"  {'Scenario':<12}│"
+    for mh in model_hdrs:
+        hdr += f"{mh:^{CELL_W}}│"
+    print(hdr)
+
+    # Separator between scenario header and sub-header
+    hdr_sep = f"  {'─'*12}┼"
+    for _ in codenames:
+        hdr_sep += f"{'─'*CELL_W}┼"
+    print(hdr_sep)
+
+    # Print sub-header row: " Gain │  Loss │ #L │"
+    sub_hdr = f"  {'Stats':<12}│"
+    for _ in codenames:
+        sub_hdr += f" {C.DIM}{'+':>{GAIN_W}}  {'-':>{LOSS_W}}  {'#':>{NUM_W}}  {'V':>{VLT_W}}{C.END} │"
+    print(sub_hdr)
+    
+    # Separator row matching sub-header positions
+    sep = f"  {'─'*12}┼"
+    for _ in codenames:
+        sep += f"{'─'*CELL_W}┼"
+    print(sep)
+    
+    # Scenario definitions
+    scenarios = [
+        ("single", "Single", False),
+        ("multi", "Multi FIFO", True),
+        ("bank", "Bank FIFO", True),
+        ("rmulti", "Multi LIFO", True),
+        ("rbank", "Bank LIFO", True),
+    ]
+    
+    for scenario_key, scenario_label, is_group in scenarios:
+        row = f"  {scenario_label:<12}│"
+
+        for code in codenames:
+            r = model_results[code][scenario_key]
+
+            if not is_group:
+                # Single: show profit in Gain column, dashes elsewhere
+                profit = r["profit"]
+                g = fmt_profit(profit, GAIN_W, 1)
+                v = fmt_vault(r["vault_remaining"], VLT_W)
+                row += f" {g}  {'─':>{LOSS_W}}  {'─':>{NUM_W}}  {v} │"
+            else:
+                # Multi/Bank: Gain, Loss, #Losers
+                profits = list(r["profits"].values())
+                plus = sum(p for p in profits if p > 0)
+                minus = sum(p for p in profits if p < 0)
+                losers = r.get("losers", sum(1 for p in profits if p <= 0))
+
+                g = fmt_profit(plus, GAIN_W)
+                l = fmt_profit(minus, LOSS_W)
+                n = fmt_losers(losers, NUM_W)
+                v = fmt_vault(r["vault"], VLT_W)
+                row += f" {g}  {l}  {n}  {v} │"
+
         print(row)
     
     # Legend
     print()
-    print(f"  S = Single user profit │ M = Multi (4 users, FIFO) │ B = Bank run (10 users, FIFO) │ RM/RB = Reverse (LIFO)")
-    print(f"  + = profits, - = losses, # = losers, V = vault remaining │ Crv: CP/Exp/Sig/Log")
+    print(f"  {C.DIM}+ = total profits │ - = total losses │ # = loser count │ V = vault residual{C.END}")
 
 
 # =============================================================================
