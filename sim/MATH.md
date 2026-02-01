@@ -2,10 +2,10 @@
 
 ## Overview
 
-This document describes the mathematical mechanics shared across all 16 commonwealth models. Each model combines a **curve type** with two boolean dimensions (Yield → Price, LP → Price). The core operations — buy, add liquidity, compound, remove liquidity, sell — are described generically with `price(supply)` as a pluggable function.
+This document describes the mathematical mechanics of the commonwealth protocol. The core operations — buy, add liquidity, compound, remove liquidity, sell — work with any bonding curve, using `price(supply)` as a pluggable function.
 
 For curve-specific formulas and behavior, see [CURVES.md](./CURVES.md).
-For the full model matrix and dimension analysis, see [MODELS.md](./MODELS.md).
+For the model matrix and fixed invariants, see [MODELS.md](./MODELS.md).
 
 ---
 
@@ -44,8 +44,7 @@ record LP position: { tokens, usdc, entry_index, timestamp }
 - LP position is recorded for yield tracking
 
 **Dimension behavior:**
-- **LP → Price = Yes:** LP USDC contributes to price reserves. Price moves.
-- **LP → Price = No:** LP USDC tracked separately (`lp_usdc`). Price unchanged.
+- LP USDC tracked separately (`lp_usdc`). Price unchanged.
 
 ### 3. Vault Compounding
 
@@ -56,11 +55,7 @@ vault_balance = principal * (1 + apy/365) ^ days
 compound_index = vault_balance / total_principal
 ```
 
-Where `total_principal = buy_usdc + lp_usdc` (sum of all deposited USDC).
-
-**Dimension behavior:**
-- **Yield → Price = Yes:** `buy_usdc_with_yield = buy_usdc * compound_index`. Price uses the yield-adjusted value.
-- **Yield → Price = No:** Price uses `buy_usdc` (original principal). Yield accrues separately.
+Where `total_principal = buy_usdc + lp_usdc`. The `compound_index` grows over time, which increases `buy_usdc_with_yield` and pushes price up.
 
 ### 4. Remove Liquidity
 
@@ -101,6 +96,43 @@ minted -= tokens_in
 - USDC withdrawn from vault
 - Price decreases per the curve function
 - Fair share cap prevents draining vault beyond entitlement
+
+---
+
+## Price Factors
+
+Understanding what moves price is essential for protocol participants.
+
+### What Increases Price
+
+| Action | Mechanism |
+|--------|-----------|
+| **Buy tokens** | Adds USDC to `buy_usdc`, which feeds directly into price calculation |
+| **Vault compounding** | Grows `compound_ratio`, multiplying `buy_usdc` into higher `buy_usdc_with_yield` |
+
+### What Decreases Price
+
+| Action | Mechanism |
+|--------|-----------|
+| **Sell tokens** | Removes USDC from `buy_usdc` proportional to tokens sold |
+| **Withdraw yield** | Reduces vault balance, lowering `compound_ratio` |
+
+### What Does NOT Affect Price
+
+| Action | Why |
+|--------|-----|
+| **Add liquidity** | LP USDC tracked separately in `lp_usdc`, not included in price reserves |
+| **Remove LP principal** | Only `lp_usdc` decreases, which doesn't feed into price |
+
+### Price Formula
+
+```
+compound_ratio = vault.balance / (buy_usdc + lp_usdc)
+buy_usdc_with_yield = buy_usdc * compound_ratio
+price = curve_price(supply, buy_usdc_with_yield)
+```
+
+**Key insight:** Vault compounding grows `buy_usdc_with_yield` over time, creating passive price appreciation even without new buys. This is because both `buy_usdc` and `lp_usdc` earn yield in the vault, but only `buy_usdc` feeds into price.
 
 ---
 
@@ -145,61 +177,6 @@ price(s) = base_price * ln(1 + k * s)
 buy_cost(s, n) = integral from s to s+n of base_price * ln(1 + k*x) dx
              = base_price * [((1 + k*(s+n)) * ln(1 + k*(s+n)) - (1 + k*s) * ln(1 + k*s)) / k - n]
 ```
-
----
-
-## Variable Dimension Math
-
-### Yield → Price
-
-Controls how vault compounding interacts with the price function.
-
-**Yes — yield feeds into price:**
-```
-compound_ratio = vault.balance / (buy_usdc + lp_usdc)
-buy_usdc_with_yield = buy_usdc * compound_ratio
-
-# Price calculation uses buy_usdc_with_yield
-price = f(buy_usdc_with_yield, ...)
-```
-
-Vault yield grows `buy_usdc` proportionally, pushing price up over time even without new buys.
-
-**No — yield distributed separately:**
-```
-# Price calculation uses buy_usdc (principal only)
-price = f(buy_usdc, ...)
-
-# Yield tracked separately
-total_yield = vault.balance - (buy_usdc + lp_usdc)
-user_yield = total_yield * (user_principal / total_principal)
-```
-
-Price is pure market signal. Yield is distributed as USDC on exit.
-
-### LP → Price
-
-Controls whether LP USDC contributes to the bonding curve reserves.
-
-**Yes — LP USDC in price reserves:**
-```
-# Constant product example:
-usdc_reserve = buy_usdc + lp_usdc  # Both contribute
-price = usdc_reserve / token_reserve
-```
-
-Adding liquidity increases reserves, moving price. Removing decreases reserves.
-
-**No — LP USDC tracked separately:**
-```
-# Constant product example:
-usdc_reserve = buy_usdc  # Only buy USDC
-price = usdc_reserve / token_reserve
-
-# lp_usdc tracked independently for yield calculations
-```
-
-Price is isolated from liquidity flows. LP operations are price-neutral.
 
 ---
 

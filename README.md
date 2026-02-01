@@ -58,11 +58,13 @@ flowchart LR
 
 The `math/` directory contains Python models that simulate the protocol under various configurations. The purpose is to **validate math and choose the correct model** before writing Solidity contracts.
 
-Each model is defined by a combination of building blocks:
-- **Bonding Curve Type** – how buy/sell price is calculated
-- **Yield Impacts Price** – whether vault yield grows token price
-- **Token Inflation** – LPs receive minted tokens as yield
-- **LP Impacts Price** – whether adding/removing liquidity moves price
+Each model is defined by its **bonding curve type**:
+- **Constant Product** (CYN), **Exponential** (EYN), **Sigmoid** (SYN), **Logarithmic** (LYN)
+
+Fixed invariants across all models:
+- **Yield → Price = Yes** — vault compounding grows token price
+- **LP → Price = No** — adding/removing liquidity is price-neutral
+- **Token Inflation = Yes** — LPs receive minted tokens as yield
 
 See [MODELS.md](math/MODELS.md) for the full model matrix and [CURVES.md](math/CURVES.md) for bonding curve analysis.
 
