@@ -8,35 +8,40 @@ from decimal import Decimal as D
 from typing import Callable, Dict, List, Optional, Tuple, TypedDict
 from enum import Enum
 
-# =============================================================================
-# Constants
-# =============================================================================
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                              CONSTANTS                                    ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
 
 K = D(1_000)
 B = D(1_000_000_000)
 
-# Test environment constants (see TEST.md)
+# Test environment bounds (see TEST.md)
 EXPOSURE_FACTOR = 100 * K
-CAP = 1 * B
-VIRTUAL_LIMIT = 100 * K
+CAP = 1 * B                # Maximum token supply
+VIRTUAL_LIMIT = 100 * K    # Threshold where virtual liquidity tapers to zero
 
-# Vault
+# Vault yield
 VAULT_APY = D(5) / D(100)
 
-# Curve-specific constants (tuned for ~500 USDC test buys)
+# ┌───────────────────────────────────────────────────────────────────────────┐
+# │ Curve-Specific Tuning (calibrated for ~500 USDC test buys)                │
+# └───────────────────────────────────────────────────────────────────────────┘
+
 EXP_BASE_PRICE = 1.0
-EXP_K = 0.0002           # 500 USDC -> ~477 tokens
+EXP_K = 0.0002             # 500 USDC -> ~477 tokens
 
 SIG_MAX_PRICE = 2.0
-SIG_K = 0.001             # 500 USDC -> ~450 tokens
+SIG_K = 0.001               # 500 USDC -> ~450 tokens
 SIG_MIDPOINT = 0.0
 
 LOG_BASE_PRICE = 1.0
-LOG_K = 0.01              # 500 USDC -> ~510 tokens
+LOG_K = 0.01                # 500 USDC -> ~510 tokens
 
-# =============================================================================
-# Enums & Model Registry
-# =============================================================================
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                         ENUMS & MODEL REGISTRY                            ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
 
 class CurveType(Enum):
     CONSTANT_PRODUCT = "C"
@@ -58,14 +63,18 @@ class ModelConfig(TypedDict):
     lp_impacts_price: bool
     deprecated: bool
 
+# ┌───────────────────────────────────────────────────────────────────────────┐
+# │ Auto-generate all 16 combinations (4 curves x 2 yield flags x 2 LP flags) │
+# │ Active models: *YN (Yield->Price=Yes, LP->Price=No).                      │
+# │ Archived: *YY, *NY, *NN (kept for backwards compatibility).               │
+# └───────────────────────────────────────────────────────────────────────────┘
+
 MODELS: Dict[str, ModelConfig] = {}
 for curve_code, curve_type in [("C", CurveType.CONSTANT_PRODUCT), ("E", CurveType.EXPONENTIAL),
                                 ("S", CurveType.SIGMOID), ("L", CurveType.LOGARITHMIC)]:
     for yield_code, yield_price in [("Y", True), ("N", False)]:
         for lp_code, lp_price in [("Y", True), ("N", False)]:
             codename = f"{curve_code}{yield_code}{lp_code}"
-            # Active models: *YN (Yield->Price=Yes, LP->Price=No)
-            # Archived: *YY, *NY, *NN (kept for backwards compatibility)
             is_deprecated = not (yield_price and not lp_price)
             MODELS[codename] = {
                 "curve": curve_type,
@@ -74,12 +83,12 @@ for curve_code, curve_type in [("C", CurveType.CONSTANT_PRODUCT), ("E", CurveTyp
                 "deprecated": is_deprecated,
             }
 
-# Active models (recommended for use)
 ACTIVE_MODELS: List[str] = [code for code, cfg in MODELS.items() if not cfg["deprecated"]]
 
-# =============================================================================
-# ANSI Colors
-# =============================================================================
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                             ANSI COLORS                                   ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
 
 class Color:
     HEADER = '\033[95m'
@@ -94,22 +103,44 @@ class Color:
     STATS = '\033[90m'
     END = '\033[0m'
 
-# =============================================================================
-# Core Classes
-# =============================================================================
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                             CORE CLASSES                                  ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# ┌─────────────────────────────────────┐
+# │              User                   │
+# └─────────────────────────────────────┘
 
 class User:
+    """Simple wallet: holds USDC and token balances."""
     def __init__(self, name: str, usd: D = D(0), token: D = D(0)):
         self.name = name
         self.balance_usd = usd
         self.balance_token = token
 
+
+# ┌─────────────────────────────────────┐
+# │       CompoundingSnapshot           │
+# └─────────────────────────────────────┘
+
 class CompoundingSnapshot:
+    """Captures vault value at a specific compounding index for delta calculations."""
     def __init__(self, value: D, index: D):
         self.value = value
         self.index = index
 
+
+# ┌─────────────────────────────────────┐
+# │              Vault                  │
+# └─────────────────────────────────────┘
+
 class Vault:
+    """USDC vault with daily APY-based compounding.
+
+    Tracks deposited USDC and grows it via a compounding index.
+    Snapshots allow computing accrued yield between any two points in time.
+    """
     def __init__(self):
         self.apy = VAULT_APY
         self.balance_usd = D(0)
@@ -118,6 +149,7 @@ class Vault:
         self.compounds = 0
 
     def balance_of(self) -> D:
+        """Current vault value, scaled by compounding growth since last snapshot."""
         if self.snapshot is None:
             return self.balance_usd
         return self.snapshot.value * (self.compounding_index / self.snapshot.index)
@@ -133,17 +165,37 @@ class Vault:
         self.balance_usd = self.balance_of()
 
     def compound(self, days: int):
+        """Advance the compounding index by N days of daily APY accrual."""
         for _ in range(days):
             self.compounding_index *= D(1) + (self.apy / D(365))
         self.compounds += days
 
+
+# ┌─────────────────────────────────────┐
+# │          UserSnapshot               │
+# └─────────────────────────────────────┘
+
 class UserSnapshot:
+    """Records the compounding index when a user adds liquidity (for yield delta)."""
     def __init__(self, index: D):
         self.index = index
 
-# =============================================================================
-# Integral Curve Math (float-based for exp/log/trig)
-# =============================================================================
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                       INTEGRAL CURVE MATH                                 ║
+# ║                    (float-based for exp/log/trig)                         ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+#
+# Each curve defines:
+#   - price(supply): spot price at a given supply level
+#   - integral(a, b): total cost to move supply from a to b
+#
+# These are used by LP.buy/sell to compute token amounts for a given USDC cost.
+
+
+# ┌─────────────────────────────────────┐
+# │      Exponential Curve              │
+# └─────────────────────────────────────┘
 
 def _exp_integral(a: float, b: float) -> float:
     """Integral of base * e^(k*x) from a to b."""
@@ -162,6 +214,11 @@ def _exp_price(s: float) -> float:
         return float('inf')
     return EXP_BASE_PRICE * math.exp(EXP_K * s)
 
+
+# ┌─────────────────────────────────────┐
+# │         Sigmoid Curve               │
+# └─────────────────────────────────────┘
+
 def _sig_integral(a: float, b: float) -> float:
     """Integral of max_p / (1 + e^(-k*(x-m))) from a to b."""
     MAX_EXP_ARG = 700
@@ -174,6 +231,11 @@ def _sig_integral(a: float, b: float) -> float:
 
 def _sig_price(s: float) -> float:
     return SIG_MAX_PRICE / (1 + math.exp(-SIG_K * (s - SIG_MIDPOINT)))
+
+
+# ┌─────────────────────────────────────┐
+# │       Logarithmic Curve             │
+# └─────────────────────────────────────┘
 
 def _log_integral(a: float, b: float) -> float:
     """Integral of base * ln(1 + k*x) from a to b."""
@@ -188,8 +250,13 @@ def _log_price(s: float) -> float:
     val = 1 + LOG_K * s
     return LOG_BASE_PRICE * math.log(val) if val > 0 else 0.0
 
+
+# ┌─────────────────────────────────────┐
+# │     Binary Search for Tokens        │
+# └─────────────────────────────────────┘
+
 def _bisect_tokens_for_cost(supply: float, cost: float, integral_fn: Callable[[float, float], float], max_tokens: float = 1e9) -> float:
-    """Find n tokens where integral(supply, supply+n) = cost using bisection."""
+    """Binary search: find n tokens where integral(supply, supply+n) = cost."""
     if cost <= 0:
         return 0.0
     lo, hi = 0.0, min(max_tokens, 1e8)
@@ -204,9 +271,17 @@ def _bisect_tokens_for_cost(supply: float, cost: float, integral_fn: Callable[[f
             hi = mid
     return (lo + hi) / 2
 
-# =============================================================================
-# LP (Liquidity Pool) - Parameterized by model dimensions
-# =============================================================================
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                          LIQUIDITY POOL (LP)                              ║
+# ╠═══════════════════════════════════════════════════════════════════════════╣
+# ║ Parameterized by two model dimensions:                                    ║
+# ║   - yield_impacts_price: vault compounding growth feeds back into price   ║
+# ║   - lp_impacts_price: LP deposits contribute to effective USDC for pricing║
+# ║                                                                           ║
+# ║ Supports 4 bonding curve types. Constant Product uses virtual reserves;   ║
+# ║ Exponential/Sigmoid/Logarithmic use integral math with a price multiplier.║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
 
 class LP:
     def __init__(self, vault: Vault, curve_type: CurveType,
@@ -216,23 +291,34 @@ class LP:
         self.yield_impacts_price = yield_impacts_price
         self.lp_impacts_price = lp_impacts_price
 
+        # Pool balances
         self.balance_usd = D(0)
         self.balance_token = D(0)
         self.minted = D(0)
+
+        # Per-user LP positions and buy tracking
         self.liquidity_token: Dict[str, D] = {}
         self.liquidity_usd: Dict[str, D] = {}
         self.user_buy_usdc: Dict[str, D] = {}
         self.user_snapshot: Dict[str, UserSnapshot] = {}
+
+        # Aggregate USDC from buys vs LP deposits (split matters for pricing)
         self.buy_usdc = D(0)
         self.lp_usdc = D(0)
 
-        # Constant product specific
+        # Constant product invariant
         self.k: Optional[D] = None
 
-    # ---- Dimension-aware USDC for price ----
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │                   Dimension-Aware Pricing                             │
+    # └───────────────────────────────────────────────────────────────────────┘
 
     def _get_effective_usdc(self) -> D:
-        """USDC amount used for price calculation, respecting yield/LP dimensions."""
+        """USDC amount used for price calculation, respecting yield/LP dimensions.
+
+        Base is always buy_usdc. LP deposits add to it if lp_impacts_price.
+        Yield compounds scale the total if yield_impacts_price.
+        """
         base = self.buy_usdc
         if self.lp_impacts_price:
             base += self.lp_usdc
@@ -246,19 +332,26 @@ class LP:
         return base
 
     def _get_price_multiplier(self) -> D:
-        """Multiplier for integral curve prices (effective_usdc / buy_usdc)."""
+        """Scaling factor for integral curves: effective_usdc / buy_usdc."""
         if self.buy_usdc == 0:
             return D(1)
         return self._get_effective_usdc() / self.buy_usdc
 
-    # ---- Constant Product helpers (TEST.md) ----
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │               Constant Product Virtual Reserves                       │
+    # └───────────────────────────────────────────────────────────────────────┘
 
     def get_exposure(self) -> D:
+        """Exposure decays linearly as more tokens are minted toward CAP."""
         effective = min(self.minted * D(1000), CAP)
         exposure = EXPOSURE_FACTOR * (D(1) - effective / CAP)
         return max(D(0), exposure)
 
     def get_virtual_liquidity(self) -> D:
+        """Virtual USDC liquidity that tapers off as buy_usdc approaches VIRTUAL_LIMIT.
+
+        Prevents extreme price swings on early, low-liquidity trades.
+        """
         base = CAP / EXPOSURE_FACTOR
         effective = min(self.buy_usdc, VIRTUAL_LIMIT)
         liquidity = base * (D(1) - effective / VIRTUAL_LIMIT)
@@ -276,7 +369,9 @@ class LP:
     def _update_k(self):
         self.k = self._get_token_reserve() * self._get_usdc_reserve()
 
-    # ---- Price ----
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │                            Price                                      │
+    # └───────────────────────────────────────────────────────────────────────┘
 
     @property
     def price(self) -> D:
@@ -287,7 +382,7 @@ class LP:
                 return D(1)
             return usdc_reserve / token_reserve
         else:
-            # Integral curves: base curve at current supply * multiplier
+            # Integral curves: base curve price at current supply, scaled by multiplier
             s = float(self.minted)
             if self.curve_type == CurveType.EXPONENTIAL:
                 base = _exp_price(s)
@@ -299,7 +394,9 @@ class LP:
                 base = 1.0
             return D(str(base)) * self._get_price_multiplier()
 
-    # ---- Fair share ----
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │         Fair Share: Caps Withdrawals to Prevent Vault Drain           │
+    # └───────────────────────────────────────────────────────────────────────┘
 
     def _apply_fair_share_cap(self, requested: D, user_fraction: D) -> D:
         vault_available = self.vault.balance_of()
@@ -316,7 +413,9 @@ class LP:
             return min(D(1), vault_available / requested_total_usdc)
         return D(1)
 
-    # ---- Core operations ----
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │                       Core Operations                                 │
+    # └───────────────────────────────────────────────────────────────────────┘
 
     def mint(self, amount: D):
         if self.minted + amount > CAP:
@@ -325,14 +424,21 @@ class LP:
         self.minted += amount
 
     def rehypo(self):
+        """Sweep pool USDC into the vault for yield."""
         self.vault.add(self.balance_usd)
         self.balance_usd = D(0)
 
     def dehypo(self, amount: D):
+        """Pull USDC back from vault into the pool."""
         self.vault.remove(amount)
         self.balance_usd += amount
 
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │                              BUY                                      │
+    # └───────────────────────────────────────────────────────────────────────┘
+
     def buy(self, user: User, amount: D):
+        """User spends USDC to receive tokens. Curve determines token output."""
         user.balance_usd -= amount
         self.balance_usd += amount
 
@@ -345,6 +451,7 @@ class LP:
             new_token = self.k / new_usdc
             out_amount = token_reserve - new_token
         else:
+            # Integral curves: divide cost by multiplier, bisect for token count
             mult = float(self._get_price_multiplier())
             effective_cost = float(amount) / mult if mult > 0 else float(amount)
             supply = float(self.minted)
@@ -368,7 +475,14 @@ class LP:
         if self.curve_type == CurveType.CONSTANT_PRODUCT:
             self._update_k()
 
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │                             SELL                                      │
+    # └───────────────────────────────────────────────────────────────────────┘
+
     def sell(self, user: User, amount: D):
+        """User returns tokens for USDC. Fair share cap prevents vault drain."""
+
+        # Track principal fraction being sold (for buy_usdc bookkeeping)
         if self.minted > 0:
             principal_fraction = amount / self.minted
             principal_portion = self.buy_usdc * principal_fraction
@@ -380,6 +494,7 @@ class LP:
 
         user.balance_token -= amount
 
+        # Compute raw USDC output from the bonding curve
         if self.curve_type == CurveType.CONSTANT_PRODUCT:
             if self.k is None:
                 self.k = self._get_token_reserve() * self._get_usdc_reserve()
@@ -403,6 +518,7 @@ class LP:
                 base_return = float(amount)
             raw_out = D(str(base_return)) * self._get_price_multiplier()
 
+        # Cap output to fair share of vault
         original_minted = self.minted + amount
         if original_minted == 0:
             out_amount = min(raw_out, self.vault.balance_of())
@@ -410,6 +526,7 @@ class LP:
             user_fraction = amount / original_minted
             out_amount = self._apply_fair_share_cap(raw_out, user_fraction)
 
+        # Update buy_usdc tracking
         self.buy_usdc -= principal_portion
         if user.name in self.user_buy_usdc:
             self.user_buy_usdc[user.name] -= user_principal_reduction
@@ -423,7 +540,12 @@ class LP:
         if self.curve_type == CurveType.CONSTANT_PRODUCT:
             self._update_k()
 
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │                        ADD LIQUIDITY                                  │
+    # └───────────────────────────────────────────────────────────────────────┘
+
     def add_liquidity(self, user: User, token_amount: D, usd_amount: D):
+        """User deposits tokens + USDC as a liquidity position."""
         user.balance_token -= token_amount
         user.balance_usd -= usd_amount
         self.balance_token += token_amount
@@ -434,17 +556,25 @@ class LP:
         if self.curve_type == CurveType.CONSTANT_PRODUCT:
             self._update_k()
 
+        # Snapshot compounding index for yield calculation on removal
         self.user_snapshot[user.name] = UserSnapshot(self.vault.compounding_index)
         self.liquidity_token[user.name] = self.liquidity_token.get(user.name, D(0)) + token_amount
         self.liquidity_usd[user.name] = self.liquidity_usd.get(user.name, D(0)) + usd_amount
 
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │                      REMOVE LIQUIDITY                                 │
+    # └───────────────────────────────────────────────────────────────────────┘
+
     def remove_liquidity(self, user: User):
+        """Withdraw LP position: original deposit + accrued yield (fair-share capped)."""
         token_deposit = self.liquidity_token[user.name]
         usd_deposit = self.liquidity_usd[user.name]
         buy_usdc_principal = self.user_buy_usdc.get(user.name, D(0))
 
+        # Yield delta since deposit
         delta = self.vault.compounding_index / self.user_snapshot[user.name].index
 
+        # Uncapped yield on LP deposit, tokens, and buy principal
         usd_yield = usd_deposit * (delta - D(1))
         usd_amount_full = usd_deposit + usd_yield
 
@@ -453,10 +583,12 @@ class LP:
         buy_usdc_yield_full = buy_usdc_principal * (delta - D(1))
         total_usdc_full = usd_amount_full + buy_usdc_yield_full
 
+        # Fair share scaling to prevent over-withdrawal from vault
         principal = usd_deposit + buy_usdc_principal
         total_principal = self.lp_usdc + self.buy_usdc
         scaling_factor = self._get_fair_share_scaling(total_usdc_full, principal, total_principal)
 
+        # Apply scaling
         total_usdc = total_usdc_full * scaling_factor
         token_yield = token_yield_full * scaling_factor
         token_amount = token_deposit + token_yield
@@ -464,16 +596,18 @@ class LP:
         buy_usdc_yield_withdrawn = buy_usdc_yield_full * scaling_factor
         lp_usdc_yield_withdrawn = usd_yield * scaling_factor
 
+        # Mint yield tokens and pull USDC from vault
         self.mint(token_yield)
-
         self.dehypo(total_usdc)
         
+        # Update aggregate USDC tracking
         lp_usdc_reduction = usd_deposit + min(lp_usdc_yield_withdrawn, max(D(0), self.lp_usdc - usd_deposit))
         self.lp_usdc -= lp_usdc_reduction
         
         if buy_usdc_yield_withdrawn > 0:
             self.buy_usdc -= min(buy_usdc_yield_withdrawn, self.buy_usdc)
 
+        # Transfer to user
         self.balance_token -= token_amount
         self.balance_usd -= total_usdc
         user.balance_token += token_amount
@@ -485,7 +619,9 @@ class LP:
         if self.curve_type == CurveType.CONSTANT_PRODUCT:
             self._update_k()
 
-    # ---- Pretty printing ----
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │                        Debug Output                                   │
+    # └───────────────────────────────────────────────────────────────────────┘
 
     def print_stats(self, label: str = "Stats"):
         C = Color
@@ -510,9 +646,10 @@ class LP:
         print(f"{C.CYAN}  │ Price:{C.END} {C.GREEN}{self.price:.6f}{C.END}  Minted: {C.YELLOW}{self.minted:.2f}{C.END}")
         print(f"{C.CYAN}  └─────────────────────────────────────────────────────{C.END}\n")
 
-# =============================================================================
-# Scenario Result Types
-# =============================================================================
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                            RESULT TYPES                                   ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
 
 
 class SingleUserResult(TypedDict):
@@ -541,9 +678,9 @@ class BankRunResult(TypedDict):
     vault: D
 
 
-# =============================================================================
-# Model Factory
-# =============================================================================
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                           MODEL FACTORY                                   ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
 
 def create_model(codename: str) -> Tuple[Vault, LP]:
     """Create a (Vault, LP) pair for the given model codename."""
@@ -553,6 +690,7 @@ def create_model(codename: str) -> Tuple[Vault, LP]:
     return vault, lp
 
 def model_label(codename: str) -> str:
+    """Human-readable label: 'CYN (Constant Product, Yield->P=Y, LP->P=N)'."""
     cfg = MODELS[codename]
     curve = CURVE_NAMES[cfg["curve"]]
     yp = "Y" if cfg["yield_impacts_price"] else "N"

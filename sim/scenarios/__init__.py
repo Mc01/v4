@@ -1,3 +1,8 @@
+"""
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                     Scenarios Module - Public API                         ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+"""
 from .single_user import single_user_scenario
 from .multi_user import multi_user_scenario
 from .bank_run import bank_run_scenario

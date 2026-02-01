@@ -1,18 +1,24 @@
 """
-Single User Scenario
-
-One user goes through the full protocol cycle:
-1. Buy tokens with USDC
-2. Add liquidity (tokens + USDC)
-3. Wait for compounding
-4. Remove liquidity
-5. Sell tokens
-
-Tests basic protocol flow and single-user profitability.
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                     Single User Scenario                                  ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║  One user goes through the full protocol cycle:                           ║
+║    1. Buy tokens with USDC                                                ║
+║    2. Add liquidity (tokens + USDC)                                       ║
+║    3. Wait for compounding                                                ║
+║    4. Remove liquidity                                                    ║
+║    5. Sell tokens                                                         ║
+║                                                                           ║
+║  Tests basic protocol flow and single-user profitability.                 ║
+╚═══════════════════════════════════════════════════════════════════════════╝
 """
 from decimal import Decimal as D
 from ..core import create_model, model_label, User, Color, K, SingleUserResult
 
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                         SCENARIO ENTRY POINT                              ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
 
 def single_user_scenario(codename: str, verbose: bool = True,
                          user_initial_usd: D = 1 * K,
@@ -30,7 +36,10 @@ def single_user_scenario(codename: str, verbose: bool = True,
         print(f"{C.CYAN}[Initial]{C.END} USDC: {C.YELLOW}{user.balance_usd}{C.END}")
         lp.print_stats("Initial")
 
-    # Buy
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │              Entry: Buy Tokens and Provide Liquidity                  │
+    # └───────────────────────────────────────────────────────────────────────┘
+
     lp.buy(user, buy_amount)
     price_after_buy = lp.price
     tokens_bought = user.balance_token
@@ -39,18 +48,20 @@ def single_user_scenario(codename: str, verbose: bool = True,
         print(f"  Got {C.YELLOW}{tokens_bought:.2f}{C.END} tokens, Price: {C.GREEN}{price_after_buy:.6f}{C.END}")
         lp.print_stats("After Buy")
 
-    # Add liquidity
-    lp_tokens = user.balance_token
-    lp_usdc = lp_tokens * lp.price
+    token_amount = user.balance_token
+    usdc_amount = token_amount * lp.price
     price_before_lp = lp.price
-    lp.add_liquidity(user, lp_tokens, lp_usdc)
+    lp.add_liquidity(user, token_amount, usdc_amount)
     price_after_lp = lp.price
     if verbose:
-        print(f"{C.BLUE}--- Add Liquidity ({lp_tokens:.2f} tokens + {lp_usdc:.2f} USDC) ---{C.END}")
+        print(f"{C.BLUE}--- Add Liquidity ({token_amount:.2f} tokens + {usdc_amount:.2f} USDC) ---{C.END}")
         print(f"  Price: {C.GREEN}{price_before_lp:.6f}{C.END} -> {C.GREEN}{price_after_lp:.6f}{C.END}")
         lp.print_stats("After LP")
 
-    # Compound
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │                          Yield Accrual                                │
+    # └───────────────────────────────────────────────────────────────────────┘
+
     price_before_compound = lp.price
     vault.compound(compound_days)
     price_after_compound = lp.price
@@ -60,7 +71,10 @@ def single_user_scenario(codename: str, verbose: bool = True,
         print(f"  Price: {C.GREEN}{price_before_compound:.6f}{C.END} -> {C.GREEN}{price_after_compound:.6f}{C.END} ({C.GREEN}+{price_after_compound - price_before_compound:.6f}{C.END})")
         lp.print_stats(f"After {compound_days}d Compound")
 
-    # Remove liquidity
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │           Exit: Withdraw Liquidity and Sell Tokens                    │
+    # └───────────────────────────────────────────────────────────────────────┘
+
     usdc_before = user.balance_usd
     lp.remove_liquidity(user)
     usdc_from_lp = user.balance_usd - usdc_before
@@ -70,7 +84,6 @@ def single_user_scenario(codename: str, verbose: bool = True,
         print(f"  USDC gained: {gc}{usdc_from_lp:.2f}{C.END}, Tokens: {C.YELLOW}{user.balance_token:.2f}{C.END}")
         lp.print_stats("After Remove LP")
 
-    # Sell
     tokens_to_sell = user.balance_token
     usdc_before_sell = user.balance_usd
     lp.sell(user, tokens_to_sell)
@@ -80,7 +93,10 @@ def single_user_scenario(codename: str, verbose: bool = True,
         print(f"  Got {C.YELLOW}{usdc_from_sell:.2f}{C.END} USDC")
         lp.print_stats("After Sell")
 
-    # Summary
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │                              P&L                                      │
+    # └───────────────────────────────────────────────────────────────────────┘
+
     profit = user.balance_usd - user_initial_usd
     if verbose:
         pc = C.GREEN if profit > 0 else C.RED

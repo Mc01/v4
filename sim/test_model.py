@@ -1,5 +1,7 @@
 """
-Commonwealth Protocol - Model Test Suite
+╔═══════════════════════════════════════════════════════════════════════════╗
+║            Commonwealth Protocol - Model Test Suite                       ║
+╚═══════════════════════════════════════════════════════════════════════════╝
 
 Tests 4 active models (*YN) defined in MODELS.md:
 - 4 curve types: Constant Product (C), Exponential (E), Sigmoid (S), Logarithmic (L)
@@ -22,7 +24,6 @@ import sys
 from decimal import Decimal as D
 from typing import Union, cast
 
-# Import core infrastructure
 from .core import (
     MODELS, ACTIVE_MODELS, CURVE_NAMES, Color,
     SingleUserResult, MultiUserResult, BankRunResult,
@@ -30,7 +31,6 @@ from .core import (
 
 ScenarioResult = Union[SingleUserResult, MultiUserResult, BankRunResult]
 
-# Import scenarios
 from .scenarios import (
     single_user_scenario,
     multi_user_scenario,
@@ -39,21 +39,24 @@ from .scenarios import (
     reverse_bank_run_scenario,
 )
 
-# =============================================================================
-# Comparison Output
-# =============================================================================
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                          COMPARISON TABLE                                 ║
+# ╠═══════════════════════════════════════════════════════════════════════════╣
+# ║  Transposed layout: scenarios as rows, models as columns.                 ║
+# ║  Each cell shows: total gains, total losses, loser count, vault residual. ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
 
 def run_comparison(codenames: list[str]) -> None:
-    """Run all scenarios for each model and print transposed comparison table.
-    
-    Transposed layout: Scenarios as rows, Models as columns.
-    This format is optimized for many scenarios with fewer models.
-    """
+    """Run all scenarios across models and print a side-by-side comparison table."""
     C = Color
     
     print(f"\n{C.DIM}Running scenarios...{C.END}", end="", flush=True)
     
-    # Collect results for each model
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │              Collect Results: Run Every Scenario for Each Model       │
+    # └───────────────────────────────────────────────────────────────────────┘
+
     model_results: dict[str, dict[str, ScenarioResult]] = {}
     for code in codenames:
         model_results[code] = {
@@ -64,14 +67,15 @@ def run_comparison(codenames: list[str]) -> None:
             "rbank": reverse_bank_run_scenario(code, verbose=False),
         }
     
-    print(f"\r{' ' * 30}\r", end="")  # Clear loading message
+    print(f"\r{' ' * 30}\r", end="")
     
-    # Curve abbreviations
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │                            Formatters                                 │
+    # └───────────────────────────────────────────────────────────────────────┘
+
     curve_abbr = {"Constant Product": "CP", "Exponential": "Exp", "Sigmoid": "Sig", "Logarithmic": "Log"}
     
-    # Helper formatters
     def fmt_profit(val: D | float, width: int = 7, decimals: int = 0) -> str:
-        """Format value with color: green positive, red negative."""
         v = float(val)
         fmt = f">{width}.{decimals}f"
         if v > 0:
@@ -81,64 +85,64 @@ def run_comparison(codenames: list[str]) -> None:
         return f"{v:{fmt}}"
     
     def fmt_losers(n: int, width: int = 2) -> str:
-        """Format loser count: red if > 0."""
         if n > 0:
             return f"{C.RED}{n:>{width}d}{C.END}"
         return f"{n:>{width}d}"
     
     def fmt_vault(val: D | float, width: int = 5) -> str:
-        """Format vault: yellow if != 0."""
         rounded = round(val, 2)
         if rounded != D(0):
             return f"{C.YELLOW}{float(val):>{width}.0f}{C.END}"
         return f"{float(val):>{width}.0f}"
     
-    # Header
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │                           Table Header                                │
+    # └───────────────────────────────────────────────────────────────────────┘
+
     print()
     print(f"{C.BOLD}{C.HEADER}{'='*60}{C.END}")
     print(f"{C.BOLD}{C.HEADER}  MODEL COMPARISON - FIFO vs LIFO {C.END}")
     print(f"{C.BOLD}{C.HEADER}{'='*60}{C.END}")
     print()
     
-    # Build model column headers with curve type
+    # Column headers: model codename with curve abbreviation
     model_hdrs: list[str] = []
     for code in codenames:
         cfg = MODELS[code]
         curve = curve_abbr.get(CURVE_NAMES[cfg["curve"]], "?")
         model_hdrs.append(f"{code}({curve})")
     
-    # Sub-columns: +(5) -(5) #(2) V(4)
+    # Sub-column widths: +(gains) -(losses) #(losers) V(vault)
     GAIN_W, LOSS_W, NUM_W, VLT_W = 5, 5, 2, 4
     CELL_W = 24
     
-    # Print header row (model names)
     hdr = f"  {'Scenario':<12}│"
     for mh in model_hdrs:
         hdr += f"{mh:^{CELL_W}}│"
     print(hdr)
 
-    # Separator between scenario header and sub-header
     hdr_sep = f"  {'─'*12}┼"
     for _ in codenames:
         hdr_sep += f"{'─'*CELL_W}┼"
     print(hdr_sep)
 
-    # Print sub-header row: " Gain │  Loss │ #L │"
     sub_hdr = f"  {'Stats':<12}│"
     for _ in codenames:
-        sub_hdr += f" {C.CYAN}{'+':>{GAIN_W}}  {'-':>{LOSS_W}}  {'#':>{NUM_W}}  {'V':>{VLT_W}}{C.END} │"
+        sub_hdr += f" {C.CYAN}{'+':{f'>{GAIN_W}'}}  {'-':{f'>{LOSS_W}'}}  {'#':{f'>{NUM_W}'}}  {'V':{f'>{VLT_W}'}}{C.END} │"
     print(sub_hdr)
     
-    # Separator row matching sub-header positions
     sep = f"  {'─'*12}┼"
     for _ in codenames:
         sep += f"{'─'*CELL_W}┼"
     print(sep)
     
-    # Scenario definitions
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │                      Rows: One Per Scenario                           │
+    # └───────────────────────────────────────────────────────────────────────┘
+
     scenarios = [
-        ("single", "Single", False),
-        ("multi", "Multi FIFO", True),
+        ("single", "Single", False),       # solo user — no losers column
+        ("multi", "Multi FIFO", True),      # group scenarios show gain/loss/losers/vault
         ("bank", "Bank FIFO", True),
         ("rmulti", "Multi LIFO", True),
         ("rbank", "Bank LIFO", True),
@@ -151,14 +155,14 @@ def run_comparison(codenames: list[str]) -> None:
             result = model_results[code][scenario_key]
 
             if not is_group:
-                # Single: show profit in Gain column, dashes elsewhere
+                # Single user: profit in gain column, dashes for loss/losers
                 r = cast(SingleUserResult, result)
                 profit = r["profit"]
                 g = fmt_profit(profit, GAIN_W, 1)
                 v = fmt_vault(r["vault_remaining"], VLT_W)
                 row += f" {g}  {C.DIM}{'-':>{LOSS_W}}  {'-':>{NUM_W}}{C.END}  {v} │"
             else:
-                # Multi/Bank: Gain, Loss, #Losers
+                # Group scenarios: aggregate gains, losses, loser count
                 r = cast(Union[MultiUserResult, BankRunResult], result)
                 profits = list(r["profits"].values())
                 plus = sum(p for p in profits if p > 0)
@@ -174,14 +178,17 @@ def run_comparison(codenames: list[str]) -> None:
 
         print(row)
     
-    # Legend
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │                              Legend                                   │
+    # └───────────────────────────────────────────────────────────────────────┘
+
     print()
     print(f"  {C.DIM}+ = total profits │ - = total losses │ # = loser count │ V = vault residual{C.END}")
 
 
-# =============================================================================
-# Main
-# =============================================================================
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                           CLI ENTRY POINT                                 ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -231,20 +238,24 @@ Examples:
     
     args = parser.parse_args()
     
-    # Parse model codes
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │              Parse and Validate Model Codes                           │
+    # └───────────────────────────────────────────────────────────────────────┘
+
     if args.models:
         codes = [c.strip().upper() for c in args.models.split(",")]
-        # Validate
         for code in codes:
             if code not in MODELS:
                 print(f"Unknown model: {code}")
                 print(f"Available: {', '.join(sorted(MODELS.keys()))}")
                 sys.exit(1)
     else:
-        # Default to active models, or all if --all flag is set
         codes = list(MODELS.keys()) if args.include_all else ACTIVE_MODELS
     
-    # Determine which scenarios to run
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │     Dispatch: Comparison Table (Multiple) or Verbose (Single)         │
+    # └───────────────────────────────────────────────────────────────────────┘
+
     run_single = args.single
     run_multi = args.multi
     run_bank = args.bank
@@ -252,22 +263,22 @@ Examples:
     run_rbank = args.rbank
     run_all = not (run_single or run_multi or run_bank or run_rmulti or run_rbank)
     
-    # Verbose mode for single model, comparison table for multiple
     verbose = len(codes) == 1
     
+    # Show comparison table only when no specific flags and multiple models
     if run_all and not verbose:
-        # Full comparison table
         run_comparison(codes)
     else:
-        # Individual scenarios
+        # Run requested scenarios (verbose for all models when flags specified)
         for code in codes:
             if run_single or run_all:
-                single_user_scenario(code, verbose=verbose)
+                single_user_scenario(code, verbose=True)
             if run_multi or run_all:
-                multi_user_scenario(code, verbose=verbose)
+                multi_user_scenario(code, verbose=True)
             if run_bank or run_all:
-                bank_run_scenario(code, verbose=verbose)
+                bank_run_scenario(code, verbose=True)
             if run_rmulti or run_all:
-                reverse_multi_user_scenario(code, verbose=verbose)
+                reverse_multi_user_scenario(code, verbose=True)
             if run_rbank or run_all:
-                reverse_bank_run_scenario(code, verbose=verbose)
+                reverse_bank_run_scenario(code, verbose=True)
+
