@@ -11,13 +11,13 @@ One user goes through the full protocol cycle:
 Tests basic protocol flow and single-user profitability.
 """
 from decimal import Decimal as D
-from ..core import create_model, model_label, User, Color, K
+from ..core import create_model, model_label, User, Color, K, SingleUserResult
 
 
 def single_user_scenario(codename: str, verbose: bool = True,
                          user_initial_usd: D = 1 * K,
                          buy_amount: D = D(500),
-                         compound_days: int = 100) -> dict:
+                         compound_days: int = 100) -> SingleUserResult:
     """Run single user full cycle. Returns result dict."""
     vault, lp = create_model(codename)
     user = User("aaron", user_initial_usd)

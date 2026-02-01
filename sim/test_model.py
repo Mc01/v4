@@ -20,12 +20,15 @@ Usage:
 import argparse
 import sys
 from decimal import Decimal as D
+from typing import Union, cast
 
 # Import core infrastructure
 from .core import (
-    K, MODELS, ACTIVE_MODELS, CURVE_NAMES, Color,
-    create_model, model_label, User, Vault, LP,
+    MODELS, ACTIVE_MODELS, CURVE_NAMES, Color,
+    SingleUserResult, MultiUserResult, BankRunResult,
 )
+
+ScenarioResult = Union[SingleUserResult, MultiUserResult, BankRunResult]
 
 # Import scenarios
 from .scenarios import (
@@ -40,7 +43,7 @@ from .scenarios import (
 # Comparison Output
 # =============================================================================
 
-def run_comparison(codenames: list[str]):
+def run_comparison(codenames: list[str]) -> None:
     """Run all scenarios for each model and print transposed comparison table.
     
     Transposed layout: Scenarios as rows, Models as columns.
@@ -51,7 +54,7 @@ def run_comparison(codenames: list[str]):
     print(f"\n{C.DIM}Running scenarios...{C.END}", end="", flush=True)
     
     # Collect results for each model
-    model_results = {}
+    model_results: dict[str, dict[str, ScenarioResult]] = {}
     for code in codenames:
         model_results[code] = {
             "single": single_user_scenario(code, verbose=False),
@@ -67,7 +70,7 @@ def run_comparison(codenames: list[str]):
     curve_abbr = {"Constant Product": "CP", "Exponential": "Exp", "Sigmoid": "Sig", "Logarithmic": "Log"}
     
     # Helper formatters
-    def fmt_profit(val, width=7, decimals=0):
+    def fmt_profit(val: D | float, width: int = 7, decimals: int = 0) -> str:
         """Format value with color: green positive, red negative."""
         v = float(val)
         fmt = f">{width}.{decimals}f"
@@ -77,13 +80,13 @@ def run_comparison(codenames: list[str]):
             return f"{C.RED}{v:{fmt}}{C.END}"
         return f"{v:{fmt}}"
     
-    def fmt_losers(n, width=2):
+    def fmt_losers(n: int, width: int = 2) -> str:
         """Format loser count: red if > 0."""
         if n > 0:
             return f"{C.RED}{n:>{width}d}{C.END}"
         return f"{n:>{width}d}"
     
-    def fmt_vault(val, width=5):
+    def fmt_vault(val: D | float, width: int = 5) -> str:
         """Format vault: yellow if != 0."""
         rounded = round(val, 2)
         if rounded != D(0):
@@ -98,7 +101,7 @@ def run_comparison(codenames: list[str]):
     print()
     
     # Build model column headers with curve type
-    model_hdrs = []
+    model_hdrs: list[str] = []
     for code in codenames:
         cfg = MODELS[code]
         curve = curve_abbr.get(CURVE_NAMES[cfg["curve"]], "?")
@@ -123,7 +126,7 @@ def run_comparison(codenames: list[str]):
     # Print sub-header row: " Gain │  Loss │ #L │"
     sub_hdr = f"  {'Stats':<12}│"
     for _ in codenames:
-        sub_hdr += f" {C.DIM}{'+':>{GAIN_W}}  {'-':>{LOSS_W}}  {'#':>{NUM_W}}  {'V':>{VLT_W}}{C.END} │"
+        sub_hdr += f" {C.CYAN}{'+':>{GAIN_W}}  {'-':>{LOSS_W}}  {'#':>{NUM_W}}  {'V':>{VLT_W}}{C.END} │"
     print(sub_hdr)
     
     # Separator row matching sub-header positions
@@ -145,20 +148,23 @@ def run_comparison(codenames: list[str]):
         row = f"  {scenario_label:<12}│"
 
         for code in codenames:
-            r = model_results[code][scenario_key]
+            result = model_results[code][scenario_key]
 
             if not is_group:
                 # Single: show profit in Gain column, dashes elsewhere
+                r = cast(SingleUserResult, result)
                 profit = r["profit"]
                 g = fmt_profit(profit, GAIN_W, 1)
                 v = fmt_vault(r["vault_remaining"], VLT_W)
-                row += f" {g}  {'─':>{LOSS_W}}  {'─':>{NUM_W}}  {v} │"
+                row += f" {g}  {C.DIM}{'-':>{LOSS_W}}  {'-':>{NUM_W}}{C.END}  {v} │"
             else:
                 # Multi/Bank: Gain, Loss, #Losers
+                r = cast(Union[MultiUserResult, BankRunResult], result)
                 profits = list(r["profits"].values())
                 plus = sum(p for p in profits if p > 0)
                 minus = sum(p for p in profits if p < 0)
-                losers = r.get("losers", sum(1 for p in profits if p <= 0))
+                bank = cast(BankRunResult, result)
+                losers = bank.get("losers", sum(1 for p in profits if p <= 0))
 
                 g = fmt_profit(plus, GAIN_W)
                 l = fmt_profit(minus, LOSS_W)

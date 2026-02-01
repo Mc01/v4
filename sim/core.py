@@ -5,7 +5,7 @@ Contains all core classes, constants, and utilities used by test_model.py and sc
 """
 import math
 from decimal import Decimal as D
-from typing import Dict, Optional
+from typing import Callable, Dict, List, Optional, Tuple, TypedDict
 from enum import Enum
 
 # =============================================================================
@@ -44,14 +44,21 @@ class CurveType(Enum):
     SIGMOID = "S"
     LOGARITHMIC = "L"
 
-CURVE_NAMES = {
+CURVE_NAMES: Dict[CurveType, str] = {
     CurveType.CONSTANT_PRODUCT: "Constant Product",
     CurveType.EXPONENTIAL: "Exponential",
     CurveType.SIGMOID: "Sigmoid",
     CurveType.LOGARITHMIC: "Logarithmic",
 }
 
-MODELS = {}
+
+class ModelConfig(TypedDict):
+    curve: CurveType
+    yield_impacts_price: bool
+    lp_impacts_price: bool
+    deprecated: bool
+
+MODELS: Dict[str, ModelConfig] = {}
 for curve_code, curve_type in [("C", CurveType.CONSTANT_PRODUCT), ("E", CurveType.EXPONENTIAL),
                                 ("S", CurveType.SIGMOID), ("L", CurveType.LOGARITHMIC)]:
     for yield_code, yield_price in [("Y", True), ("N", False)]:
@@ -68,7 +75,7 @@ for curve_code, curve_type in [("C", CurveType.CONSTANT_PRODUCT), ("E", CurveTyp
             }
 
 # Active models (recommended for use)
-ACTIVE_MODELS = [code for code, cfg in MODELS.items() if not cfg["deprecated"]]
+ACTIVE_MODELS: List[str] = [code for code, cfg in MODELS.items() if not cfg["deprecated"]]
 
 # =============================================================================
 # ANSI Colors
@@ -158,7 +165,7 @@ def _exp_price(s: float) -> float:
 def _sig_integral(a: float, b: float) -> float:
     """Integral of max_p / (1 + e^(-k*(x-m))) from a to b."""
     MAX_EXP_ARG = 700
-    def F(x):
+    def F(x: float) -> float:
         arg = SIG_K * (x - SIG_MIDPOINT)
         if arg > MAX_EXP_ARG:
             return (SIG_MAX_PRICE / SIG_K) * arg
@@ -170,7 +177,7 @@ def _sig_price(s: float) -> float:
 
 def _log_integral(a: float, b: float) -> float:
     """Integral of base * ln(1 + k*x) from a to b."""
-    def F(x):
+    def F(x: float) -> float:
         u = 1 + LOG_K * x
         if u <= 0:
             return 0.0
@@ -181,7 +188,7 @@ def _log_price(s: float) -> float:
     val = 1 + LOG_K * s
     return LOG_BASE_PRICE * math.log(val) if val > 0 else 0.0
 
-def _bisect_tokens_for_cost(supply: float, cost: float, integral_fn, max_tokens: float = 1e9) -> float:
+def _bisect_tokens_for_cost(supply: float, cost: float, integral_fn: Callable[[float, float], float], max_tokens: float = 1e9) -> float:
     """Find n tokens where integral(supply, supply+n) = cost using bisection."""
     if cost <= 0:
         return 0.0
@@ -504,10 +511,41 @@ class LP:
         print(f"{C.CYAN}  └─────────────────────────────────────────────────────{C.END}\n")
 
 # =============================================================================
+# Scenario Result Types
+# =============================================================================
+
+
+class SingleUserResult(TypedDict):
+    codename: str
+    tokens_bought: D
+    price_after_buy: D
+    price_after_lp: D
+    price_after_compound: D
+    final_usdc: D
+    profit: D
+    vault_remaining: D
+
+
+class MultiUserResult(TypedDict):
+    codename: str
+    profits: Dict[str, D]
+    vault: D
+
+
+class BankRunResult(TypedDict):
+    codename: str
+    profits: Dict[str, D]
+    winners: int
+    losers: int
+    total_profit: D
+    vault: D
+
+
+# =============================================================================
 # Model Factory
 # =============================================================================
 
-def create_model(codename: str):
+def create_model(codename: str) -> Tuple[Vault, LP]:
     """Create a (Vault, LP) pair for the given model codename."""
     cfg = MODELS[codename]
     vault = Vault()

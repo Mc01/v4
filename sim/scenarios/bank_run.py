@@ -9,10 +9,10 @@ Bank Run Scenario (FIFO)
 Tests protocol behavior under stress when everyone exits.
 """
 from decimal import Decimal as D
-from ..core import create_model, model_label, User, Color, K
+from ..core import create_model, model_label, User, Color, K, BankRunResult
 
 
-def bank_run_scenario(codename: str, verbose: bool = True) -> dict:
+def bank_run_scenario(codename: str, verbose: bool = True) -> BankRunResult:
     """10 users, 365 days compound, all exit sequentially."""
     vault, lp = create_model(codename)
     C = Color
@@ -49,7 +49,7 @@ def bank_run_scenario(codename: str, verbose: bool = True) -> dict:
         print(f"  Vault: {C.YELLOW}{vault.balance_of():.2f}{C.END}, Price: {C.GREEN}{lp.price:.6f}{C.END}")
 
     # All exit
-    results = {}
+    results: dict[str, D] = {}
     winners = 0
     losers = 0
     for name, buy_amt in users_data:
@@ -67,7 +67,7 @@ def bank_run_scenario(codename: str, verbose: bool = True) -> dict:
             pc = C.GREEN if profit > 0 else C.RED
             print(f"  {name:7s}: Invested {C.YELLOW}{buy_amt}{C.END}, Profit: {pc}{profit:.2f}{C.END}")
 
-    total_profit = sum(results.values(), D(0))
+    total_profit: D = sum(results.values(), D(0))
     if verbose:
         print(f"\n{C.BOLD}Winners: {C.GREEN}{winners}{C.END}, Losers: {C.RED}{losers}{C.END}")
         tc = C.GREEN if total_profit > 0 else C.RED

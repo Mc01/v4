@@ -8,10 +8,10 @@ Reverse Multi-User Scenario (LIFO)
 Tests whether late entrants benefit from exiting first.
 """
 from decimal import Decimal as D
-from ..core import create_model, model_label, User, Color, K
+from ..core import create_model, model_label, User, Color, MultiUserResult
 
 
-def reverse_multi_user_scenario(codename: str, verbose: bool = True) -> dict:
+def reverse_multi_user_scenario(codename: str, verbose: bool = True) -> MultiUserResult:
     """4 users, staggered exits over 200 days — REVERSE exit order (last buyer exits first)."""
     vault, lp = create_model(codename)
     C = Color
@@ -47,7 +47,7 @@ def reverse_multi_user_scenario(codename: str, verbose: bool = True) -> dict:
         lp.print_stats("After All Buy + LP")
 
     # Staggered exits: REVERSE order (Dennis first, Aaron last)
-    results = {}
+    results: dict[str, D] = {}
     reversed_cfg = list(reversed(users_cfg))
     for i, (name, buy_amt, initial) in enumerate(reversed_cfg):
         vault.compound(compound_interval)
@@ -76,9 +76,9 @@ def reverse_multi_user_scenario(codename: str, verbose: bool = True) -> dict:
 
     if verbose:
         print(f"\n{C.BOLD}{C.HEADER}=== FINAL SUMMARY ==={C.END}")
-        total = D(0)
+        total: D = D(0)
         for name, buy_amt, initial in users_cfg:
-            p = results[name]
+            p: D = results[name]
             total += p
             pc = C.GREEN if p > 0 else C.RED
             print(f"  {name:7s}: Invested {C.YELLOW}{buy_amt}{C.END}, Profit: {pc}{p:.2f}{C.END}")
