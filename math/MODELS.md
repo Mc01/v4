@@ -1,160 +1,125 @@
-# LP Model Comparison
+# Model Matrix
 
-## Models
+## What Defines a Model
 
-| # | Name | Key Difference |
-|---|------|----------------|
-| 1 | **All Invariants (Fixed)** | Current model with bug fixes |
-| 2 | **Yield No Price Impact** | Yield earned but doesn't affect price |
-| 3 | **No Token Inflation** | Remove 5% token APY for LPs |
-| 4 | **Linear Pricing** | Remove bonding curve x*y=k |
-| 5 | **Minimal (2+3)** | Yield no price impact + no token inflation |
+Each model is a unique combination of three dimensions:
 
----
+1. **Curve Type** — the pricing function used for buy/sell operations
+2. **Yield → Price** — whether vault yield feeds back into the price curve
+3. **LP → Price** — whether adding/removing liquidity affects token price
 
-## Invariants
-
-|  | 1 | 2 | 3 | 4 | 5 |
-|--|---|---|---|---|---|
-| **Bonding curve (x*y=k)** | ✅ | ✅ | ✅ | ❌ | ✅ |
-| **5% APY buy_usdc** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **5% APY lp_usdc** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Yield → price ↑** | ✅ | ❌ | ✅ | ✅ | ❌ |
-| **5% token inflation (LP)** | ✅ | ✅ | ❌ | ✅ | ❌ |
-| **Buy → price ↑** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Sell → price ↓** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **LP add/remove = price neutral** | ✅ | ✅ | ✅ | ✅ | ✅ |
+This gives us **4 curves × 2 × 2 = 16 models**.
 
 ---
 
-## Strengths & Weaknesses
+## Fixed Invariants
 
-| Model | Strengths | Weaknesses |
-|-------|-----------|------------|
-| **1** | Full features, price appreciates, LPs get USDC + tokens | Bonding curve slippage (~5%), complex accounting |
-| **2** | Price = pure market, yield as bonus, simpler | No passive price growth, still has slippage |
-| **3** | Simpler (no minting), price grows, clear USDC yield | LPs miss token upside, still has slippage |
-| **4** | **Zero slippage**, simple math, perfectly fair | No market price discovery, can be gamed |
-| **5** | **Simplest**, clean separation (trade vs yield) | Least features, no price growth, has slippage |
+These properties are the same across all 16 models:
 
----
-
-## Scenario Comparison
-
-### Scenario 1: Single User (1000 USDC → buy 500 → LP → 100 days → exit)
-
-| Model | User Final | Profit | Vault | Why |
-|-------|------------|--------|-------|-----|
-| **Current** | **991** | **-9** | **22** | ❌ Bug: buy_usdc reduced, yield trapped |
-| **1. Fixed** | **1011** | **+11** | **0** | ✅ Yield distributed in sell |
-| **2. Yield≠Price** | **1011** | **+11** | **0** | ✅ Same profit, price doesn't grow |
-| **3. No Inflation** | **1009** | **+9** | **0** | ✅ No token yield, only USDC |
-| **4. Linear** | **1014** | **+14** | **0** | ✅ No slippage → max profit |
-| **5. Minimal** | **1009** | **+9** | **0** | ✅ No token inflation |
+| Property | Value | Rationale |
+|----------|-------|-----------|
+| **Token Inflation** | Always yes | LPs earn minted tokens at 5% APY on tokens provided as liquidity |
+| **Buy/Sell Impacts Price** | Always yes | Core price discovery mechanism — without it, there is no market |
+| **Vault APY** | 5% | All USDC is rehypothecated into yield vaults |
 
 ---
 
-### Scenario 2: Multi-User (4 users, staggered exits over 200 days)
+## Variable Dimensions
 
-| Model | Aaron | Bob | Carl | Dennis | Vault |
-|-------|-------|-----|------|--------|-------|
-| **Current** | **+41** | **+12** | **~0** | **-46** | **+54** ❌ |
-| **1. Fixed** | **+42** | **+13** | **+2** | **-4** | **0** ✅ |
-| **2. Yield≠Price** | **+40** | **+12** | **+1** | **-6** | **0** ✅ |
-| **3. No Inflation** | **+39** | **+11** | **+1** | **-5** | **0** ✅ |
-| **4. Linear** | **+43** | **+14** | **+4** | **+1** | **0** ✅ |
-| **5. Minimal** | **+37** | **+10** | **0** | **-8** | **0** ✅ |
+### Yield → Price
 
-**Note:** Dennis loses in most models (late buyer, early exit). Only Linear model makes him profitable.
+Controls whether vault compounding grows the token price or is distributed separately.
 
----
+| Value | Mechanic |
+|-------|----------|
+| **Yes** | `buy_usdc` grows with vault yield. Price = f(buy_usdc_with_yield). Vault compounding directly pushes price up. Holders benefit passively from price appreciation. |
+| **No** | `buy_usdc` principal stays fixed for price calculation. Vault yield accrues separately and is distributed as USDC on exit. Price only moves from buys/sells. |
 
-### Scenario 3: Bank Run (10 users, 365 days, all exit)
+**Tradeoff:** "Yes" creates passive price growth (attractive to holders) but may disadvantage late buyers who enter at yield-inflated prices. "No" keeps price as pure market signal but yield is invisible until exit.
 
-| Model | Total Profit | Winners | Losers | Vault | Fairest? |
-|-------|--------------|---------|--------|-------|----------|
-| **Current** | **+180** | **6** | **4** | **+120** ❌ | ❌ |
-| **1. Fixed** | **+220** | **8** | **2** | **0** ✅ | Fair |
-| **2. Yield≠Price** | **+200** | **7** | **3** | **0** ✅ | Fair |
-| **3. No Inflation** | **+210** | **7** | **3** | **0** ✅ | Fair |
-| **4. Linear** | **+240** | **10** | **0** | **0** ✅ | **Best** |
-| **5. Minimal** | **+180** | **6** | **4** | **0** ✅ | Least fair |
+### LP → Price
+
+Controls whether liquidity provision affects the bonding curve reserves.
+
+| Value | Mechanic |
+|-------|----------|
+| **Yes** | LP USDC contributes to price reserves. Adding liquidity pushes price up; removing pushes it down. LP and buy USDC are unified in the curve. |
+| **No** | LP USDC is tracked separately (`lp_usdc`). Adding/removing liquidity is price-neutral. Only `buy_usdc` feeds into the bonding curve. |
+
+**Tradeoff:** "Yes" means LPs directly contribute to price discovery but creates price jumps on large LP events. "No" isolates price from liquidity flows but requires separate accounting for buy vs LP USDC.
 
 ---
 
-## Math Example: Model 1 vs Model 2
+## The 16 Models
 
-### Setup: Single user, 500 USDC buy, 100 days
+### Codename Convention
 
-#### Model 1: Yield → Price ↑
+`[Curve][Yield→Price][LP→Price]`
 
-**Buy:** 500 USDC → 476.19 tokens (bonding curve slippage)
-- buy_usdc = 500
-- Price = 1.045
+- **C** = Constant Product, **E** = Exponential, **S** = Sigmoid, **L** = Logarithmic
+- **Y** = Yes, **N** = No
 
-**Add LP:** 476.19 tokens + 497.38 USDC
-- lp_usdc = 497.38
-- Price = 1.045 (unchanged)
+### Full Matrix
 
-**Compound 100 days:**
-- Vault: 997.38 → 1011.14
-- buy_usdc with yield: 500 → 506.90
-- **Price: 1.045 → 1.046** (↑ from yield)
-
-**Exit:**
-- User gets all vault value: 1011.14 USDC
-- Profit: +11.14
-
----
-
-#### Model 2: Yield ≠ Price
-
-**Buy:** 500 USDC → 476.19 tokens (same slippage)
-- buy_usdc_principal = 500
-- Price = 1.045
-
-**Add LP:** 476.19 tokens + 497.38 USDC
-- lp_usdc = 497.38
-- Price = 1.045 (unchanged)
-
-**Compound 100 days:**
-- Vault: 997.38 → 1011.14 (yield earned!)
-- buy_usdc_principal = 500 (doesn't change)
-- **Price: 1.045 → 1.045** (no change)
-
-**Exit:**
-- User gets all vault value: 1011.14 USDC (same!)
-- Profit: +11.14 (same!)
-
-**Key difference:** Price doesn't grow in Model 2, but profit is same because yield is distributed on exit.
+| Codename | Curve Type | Yield → Price | LP → Price |
+|----------|-----------|:---:|:---:|
+| CYY | Constant Product | Yes | Yes |
+| CYN | Constant Product | Yes | No |
+| CNY | Constant Product | No | Yes |
+| CNN | Constant Product | No | No |
+| EYY | Exponential | Yes | Yes |
+| EYN | Exponential | Yes | No |
+| ENY | Exponential | No | Yes |
+| ENN | Exponential | No | No |
+| SYY | Sigmoid | Yes | Yes |
+| SYN | Sigmoid | Yes | No |
+| SNY | Sigmoid | No | Yes |
+| SNN | Sigmoid | No | No |
+| LYY | Logarithmic | Yes | Yes |
+| LYN | Logarithmic | Yes | No |
+| LNY | Logarithmic | No | Yes |
+| LNN | Logarithmic | No | No |
 
 ---
 
-## Recommendation
+## Curve Type Summary
 
-### For Maximum Fairness: **Model 4 (Linear)**
-- Zero slippage = everyone gets exact same price
-- All users profitable in bank run scenario
-- Dead simple math
+Each curve type brings different characteristics to the model. See [CURVES.md](./CURVES.md) for detailed formulas and behavior analysis.
 
-### For Market Dynamics: **Model 1 (Fixed)**
-- Bonding curve for price discovery
-- Price appreciation attracts holders
-- Most features
+| Curve | Price Discovery | Slippage | Fairness | Complexity |
+|-------|----------------|----------|----------|------------|
+| **Constant Product** | Strong | High (both sides) | Moderate | Low |
+| **Exponential** | Very strong | Very high at scale | Low (favors early) | Medium |
+| **Sigmoid** | Phased (slow → fast → plateau) | Moderate | High | High |
+| **Logarithmic** | Moderate | Decreasing over time | Moderate-High | Medium |
 
-### For Simplicity: **Model 5 (Minimal)**
-- Fewest moving parts
-- Easy to audit
-- Clear trade/yield separation
+### Constant Product
+
+Standard AMM (`x * y = k`). Proven in production. Natural price discovery with symmetric slippage on both buy and sell. Moderate fairness — slippage creates buy/sell spread that disadvantages round-trip trades.
+
+### Exponential
+
+Price grows exponentially with supply (`base_price * e^(k*s)`). Aggressive price discovery that heavily rewards early participants. Steep curve creates high slippage at scale. May conflict with the "common good" principle by structurally favoring early entrants.
+
+### Sigmoid
+
+S-shaped price curve with three phases: slow start, rapid growth, plateau (`max_price / (1 + e^(-k*(s - midpoint)))`). Fair to both early and late participants. Bounded price ceiling provides stability at maturity but may reduce incentive in plateau phase.
+
+### Logarithmic
+
+Diminishing growth (`base_price * ln(1 + k*s)`). Early buyers rewarded but not excessively. Slippage decreases as supply grows, favoring larger/later pools. Unbounded price but with diminishing returns that may reduce late-stage interest.
 
 ---
 
-## Implementation Complexity
+## Expected Tradeoffs
 
-| Model | Lines Changed | Complexity |
-|-------|---------------|------------|
-| **1. Fixed** | ~20 | Low (bug fix only) |
-| **2. Yield≠Price** | ~5 | Trivial (1 line in price calc) |
-| **3. No Inflation** | ~15 | Low (remove minting) |
-| **4. Linear** | ~50 | Medium (rewrite pricing) |
-| **5. Minimal** | ~20 | Low (combine 2+3) |
+| Dimension | Effect on Fairness | Effect on Slippage | Effect on Price Discovery | Effect on Complexity |
+|-----------|-------------------|-------------------|--------------------------|---------------------|
+| **Yield → Price = Yes** | Late buyers enter at yield-inflated price | No direct effect | Passive growth signal | Requires yield-adjusted reserve tracking |
+| **Yield → Price = No** | Price reflects pure demand | No direct effect | Cleaner signal | Simpler price calculation |
+| **LP → Price = Yes** | LP events move price (can disadvantage) | LP adds/removes create slippage | Richer signal (demand + liquidity) | Unified reserves |
+| **LP → Price = No** | LP is price-neutral (fairer) | No LP slippage | Price = pure buy/sell | Dual tracking (buy_usdc vs lp_usdc) |
+| **Constant Product** | Moderate | High | Strong | Low |
+| **Exponential** | Low (early bias) | Very high | Very strong | Medium |
+| **Sigmoid** | High (lifecycle) | Moderate | Phased | High |
+| **Logarithmic** | Moderate-High | Decreasing | Moderate | Medium |

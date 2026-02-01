@@ -1,103 +1,75 @@
-# Yieldmas – Rehypo LP Memecoin (Draft Spec)
-
----
+# Commonwealth – Yield-Bearing LP Token Protocol
 
 ## Concept
 
-Users buy the meme token with USDC, then provide liquidity into a **V4 Token : USDC** pool.  
-The protocol rehypothecates USDC into a yield vault (e.g., **Spark / Sky**) and redistributes yield (+ fees) back to liquidity providers (and optionally lockers).
+Commonwealth is a token protocol where the token is a **common good** of all participants. Users buy the token with USDC, then provide liquidity into a **Token : USDC** pool. The protocol rehypothecates all USDC into yield vaults (e.g. **Spark / Sky**) and redistributes yield back to liquidity providers.
+
+The goal: a protocol that is **attractive to users** (everyone earns yield) and **sustainable** (the commonwealth generates returns). The best outcome is one where the fewest users lose money.
 
 ---
 
 ## User Journey
 
-1. Buy token using USDC  
-2. USDC is counted as "common wealth" in Pool (it is deposited into yield bearing vault)  
-3. Add liquidity (token + USDC) to activate participation in common wealth  
-4. USDC is deposited again into yield bearing vault  
-5. Token is locked for some time in contract
-6. When you sell USDC it is added to vault each time  
-7. When you sell token then USDC is taken out from vault for liquidity  
-8. Vault fees are tracked & automatically collected when you want to remove liquidity  
-9. Locked token has inflation APY (example: 1 year deposit → same % as USDT APY)  
-10. Custom AMM → computes amounts based on balances in PoolManager & Vault
+1. User buys tokens with USDC
+2. USDC enters the commonwealth (deposited into yield-bearing vault)
+3. User adds liquidity (token + USDC pair) to participate in yield
+4. USDC from liquidity is also deposited into the vault
+5. Vault generates yield (e.g. 5% APY)
+6. Yield is distributed to liquidity providers proportionally
+7. User can remove liquidity and sell tokens at any time
 
 ---
 
-## Core Economic Loop (diagram)
+## Yield Sources
+
+A liquidity provider is exposed to three sources of yield:
+
+1. **Buy USDC yield** – yield on USDC spent to buy tokens
+2. **LP USDC yield** – yield on USDC provided as liquidity
+3. **Token inflation** – new tokens minted proportional to tokens provided as liquidity
+
+**Only paired liquidity (token + USDC) entitles the provider to yield.** Holding tokens alone does not earn yield.
+
+---
+
+## Core Economic Loop
 
 ```mermaid
 flowchart LR
-  U[User] -->|swap USDC -> token| T[V4 Token]
-  U -->|deposit token + USDC| P[V4:USDC Pool]
-  P -->|sweep / stake USDC| V[Spark / Sky Vault]
-  V -->|yield accrues| V
-  P <-->|withdraw USDC to settle exits| V
-  P -->|LP fees + vault yield| R[Rewards accounting]
-  R -->|claim / auto-collect on remove liquidity| U
+  U[User] -->|buy token with USDC| P[Commonwealth Pool]
+  U -->|add token + USDC| P
+  P -->|rehypothecate USDC| V[Yield Vault]
+  V -->|5% APY| V
+  P <-->|withdraw USDC for exits| V
+  P -->|yield + token inflation| U
 ```
 
 ---
 
-## “Common Wealth” / Accounting Intuition
+## Protocol Fee
 
-The protocol tracks **two** categories of value:
-
-- **On-hand pool balances**: what the user wallet holds *right now*
-- **Deferred / vault-backed balances**: funds in the "common wealth" (pool & vaults)
-
-A practical phrasing:
-
-- The pool keeps just enough USDC for immediate swap/exit needs
-- Excess USDC is deposited into the vault
-- LPs (and/or lockers) earn a pro-rata share of vault yield + pool fees
-- On exits/sells, the system pulls USDC out of the vault to settle
+- All USDC is deposited into yield vaults generating 5% APY
+- The commonwealth may take a percentage of generated yield as its cut
+- Protocol fee is configurable per model (starting at 0% for testing)
 
 ---
 
-## Example Math
+## This Is a Testfield
 
-**Scenario**
-1. 100 USDC → swap → 100 V4 tokens  
-2. 100 USDC → stake → vault  
-3. 100 V4 tokens + 101 USDC → add liquidity  
-4. 101 USDC → stake → vault  
-5. 100 V4 tokens → lock → pool  
-6. User receives rewards:
-   - 5% APY on 100 USDC (initial swap leg)
-   - 5% APY on 101 USDC (liquidity leg)
-   - 5% APY on V4 tokens (inflation)
-7. Protocol effectively generates ~7.5% APY from whole user capital
+The `math/` directory contains Python models that simulate the protocol under various configurations. The purpose is to **validate math and choose the correct model** before writing Solidity contracts.
 
-After ~1 year (illustration from your note):
-- user portfolio: **111.15 USDC + 105 V4 tokens**
+Each model is defined by a combination of building blocks:
+- **Bonding Curve Type** – how buy/sell price is calculated
+- **Yield Impacts Price** – whether vault yield grows token price
+- **Token Inflation** – LPs receive minted tokens as yield
+- **LP Impacts Price** – whether adding/removing liquidity moves price
 
-> Exact outcomes depend on vault APY, fee model, how you attribute “swap-leg” yield, and how you price exits.
+See [MODELS.md](math/MODELS.md) for the full model matrix and [CURVES.md](math/CURVES.md) for bonding curve analysis.
 
 ---
 
-## Implementation Sketch (Facet / Hook Awareness)
+## References
 
-1) **Initial deployment**: “V4 token facet” + base asset functionality  
-2) **Pool creation with hook**  
-3) **Attach facet aware of Pool, Hook & Vault**
-
-```mermaid
-flowchart TB
-  subgraph Deploy
-    F[V4 token facet] --> BA[Base asset functionality]
-  end
-
-  subgraph Pool
-    P[V4:USDC Pool] <--> H[Liquidity control hook]
-  end
-
-  subgraph Yield
-    V[Spark / Sky Vault]
-  end
-
-  F -->|swap tracking / deferred balances| P
-  F -->|vault integration / rehypothecation| V
-  P -->|stake USDC| V
-  V -->|withdraw USDC to settle exits| P
-```
+- **Rehypothecation** – deploying deposited capital into yield vaults
+- **Bonding Curves** – Bancor, Uniswap v2, Curve Finance
+- **Yield Vaults** – Spark (Sky/MakerDAO ecosystem)
