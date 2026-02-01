@@ -142,6 +142,9 @@ Each curve defines `price(supply)` and the integral used to compute buy cost / s
 
 ### Constant Product (x * y = k)
 
+The classic AMM formula where the product of reserves stays constant. Price emerges from the ratio of reserves. Most capital-efficient for high-volume trading.
+
+**High-level:**
 ```
 token_reserve * usdc_reserve = k
 
@@ -151,8 +154,28 @@ Sell: (token_reserve + tokens_in) * (usdc_reserve - usdc_out) = k
 price = usdc_reserve / token_reserve
 ```
 
+**Exact formulas:**
+```
+k = x · y                                           # invariant
+p = y / x                                           # spot price
+Δx = x - k/(y + Δy)                                 # tokens out for Δy USDC in
+Δy = y - k/(x + Δx)                                 # USDC out for Δx tokens in
+```
+
+| ✅ Strengths | ❌ Weaknesses |
+|-------------|---------------|
+| Battle-tested (Uniswap) | High slippage on large trades |
+| Simple, predictable | No built-in price floor |
+| Always liquid | Impermanent loss for LPs |
+| Gas efficient | Requires significant reserves |
+
+---
+
 ### Exponential
 
+Price grows exponentially with supply. Creates strong price appreciation as tokens are minted, rewarding early participants. Can lead to extreme prices at high supply.
+
+**High-level:**
 ```
 price(s) = base_price * e^(k * s)
 
@@ -160,8 +183,33 @@ buy_cost(s, n) = integral from s to s+n of base_price * e^(k*x) dx
              = (base_price / k) * (e^(k*(s+n)) - e^(k*s))
 ```
 
+**Exact formulas:**
+```
+p(s) = P₀ · eᵏˢ                                     # price at supply s
+
+∫ₐᵇ P₀ · eᵏˣ dx = (P₀/k) · (eᵏᵇ - eᵏᵃ)             # cost from a to b
+```
+
+**Copyable (Python/code):**
+```python
+price = P0 * exp(k * s)
+cost = (P0 / k) * (exp(k * b) - exp(k * a))
+```
+
+| ✅ Strengths | ❌ Weaknesses |
+|-------------|---------------|
+| Strong early-mover rewards | Can overflow at high supply |
+| Aggressive price discovery | Late buyers face steep costs |
+| Clear growth trajectory | Requires careful k tuning |
+| Good for scarce assets | Extreme prices deter adoption |
+
+---
+
 ### Sigmoid
 
+Price follows an S-curve, starting low, accelerating through a midpoint, then asymptoting to a maximum. Models natural adoption curves where growth saturates.
+
+**High-level:**
 ```
 price(s) = max_price / (1 + e^(-k * (s - midpoint)))
 
@@ -169,14 +217,66 @@ buy_cost(s, n) = integral from s to s+n of price(x) dx
              = (max_price / k) * ln(1 + e^(k*(s+n-midpoint))) - ln(1 + e^(k*(s-midpoint)))
 ```
 
+**Exact formulas:**
+```
+p(s) = Pₘₐₓ / (1 + e⁻ᵏ⁽ˢ⁻ᵐ⁾)                        # price at supply s
+
+∫ₐᵇ p(x) dx = (Pₘₐₓ/k) · [ln(1 + eᵏ⁽ᵇ⁻ᵐ⁾) - ln(1 + eᵏ⁽ᵃ⁻ᵐ⁾)]
+```
+
+**Copyable (Python/code):**
+```python
+price = Pmax / (1 + exp(-k * (s - m)))
+cost = (Pmax / k) * (log(1 + exp(k * (b - m))) - log(1 + exp(k * (a - m))))
+```
+
+| ✅ Strengths | ❌ Weaknesses |
+|-------------|---------------|
+| Price ceiling prevents runaways | Complex integral calculation |
+| Models real adoption curves | Slow growth near extremes |
+| Predictable max price | Less reward for early buyers |
+| Smooth price transitions | Midpoint tuning critical |
+
+---
+
 ### Logarithmic
 
+Price grows logarithmically — fast initially, then slowing down. Creates diminishing returns for later participants, making the curve more accessible over time.
+
+**High-level:**
 ```
 price(s) = base_price * ln(1 + k * s)
 
 buy_cost(s, n) = integral from s to s+n of base_price * ln(1 + k*x) dx
              = base_price * [((1 + k*(s+n)) * ln(1 + k*(s+n)) - (1 + k*s) * ln(1 + k*s)) / k - n]
 ```
+
+**Exact formulas:**
+```
+p(s) = P₀ · ln(1 + ks)                              # price at supply s
+
+F(x) = P₀ · [(u·ln(u) - u)/k + x]  where u = 1 + kx  # antiderivative
+
+∫ₐᵇ p(x) dx = F(b) - F(a)
+```
+
+**Copyable (Python/code):**
+```python
+price = P0 * log(1 + k * s)
+
+def F(x):
+    u = 1 + k * x
+    return P0 * ((u * log(u) - u) / k + x)
+
+cost = F(b) - F(a)
+```
+
+| ✅ Strengths | ❌ Weaknesses |
+|-------------|---------------|
+| Accessible to late joiners | Early movers get less upside |
+| No overflow risk | Slower price appreciation |
+| Gentle growth curve | May not incentivize early buys |
+| Sustainable long-term | Complex antiderivative |
 
 ---
 
@@ -257,6 +357,17 @@ Curve-specific constants (vary per implementation):
 | Curve | Constants |
 |-------|-----------|
 | Constant Product | Initial reserves (or virtual reserve parameters) |
-| Exponential | `base_price`, `k` (growth rate) |
-| Sigmoid | `max_price`, `k` (steepness), `midpoint` |
-| Logarithmic | `base_price`, `k` (scaling factor) |
+| Exponential | `P₀ = 1`, `k = 0.0002` (growth rate) |
+| Sigmoid | `Pₘₐₓ = 2`, `k = 0.001` (steepness), `m = 0` (midpoint) |
+| Logarithmic | `P₀ = 1`, `k = 0.01` (scaling factor) |
+
+---
+
+## Quick Reference
+
+| Curve | Price Formula | Integral (a → b) |
+|-------|---------------|------------------|
+| Constant Product | `y / x` | AMM swap formula |
+| Exponential | `P₀ · eᵏˢ` | `(P₀/k) · (eᵏᵇ - eᵏᵃ)` |
+| Sigmoid | `Pₘₐₓ / (1 + e⁻ᵏ⁽ˢ⁻ᵐ⁾)` | `(Pₘₐₓ/k) · [ln(1+eᵏ⁽ᵇ⁻ᵐ⁾) - ln(1+eᵏ⁽ᵃ⁻ᵐ⁾)]` |
+| Logarithmic | `P₀ · ln(1+ks)` | `F(b) - F(a)` where `F(x) = P₀·[(u·ln(u)-u)/k + x]` |
