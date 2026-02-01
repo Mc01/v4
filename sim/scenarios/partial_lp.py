@@ -1,123 +1,140 @@
 """
 ╔═══════════════════════════════════════════════════════════════════════════╗
-║                    Bank Run Scenario (FIFO)                               ║
+║                  Partial Liquidity Provision Scenario                     ║
 ╠═══════════════════════════════════════════════════════════════════════════╣
-║  10 users enter, compound for 365 days, then all exit sequentially (FIFO):║
-║    1. All users buy tokens and add liquidity                              ║
-║    2. Compound for 365 days                                               ║
-║    3. All users exit in order (Aaron first, Jack last)                    ║
+║  Tests heterogeneous LP strategies.                                       ║
 ║                                                                           ║
-║  Tests protocol behavior under stress when everyone exits.                ║
+║  Users buy the same amount but LP different fractions of their tokens:    ║
+║    - Alice: 100% LP                                                       ║
+║    - Bob: 50% LP, 50% hold                                                ║
+║    - Carl: 25% LP, 75% hold                                               ║
+║    - Diana: 0% LP (pure hold)                                             ║
+║                                                                           ║
+║  Key insight: Yield rewards are divided proportionally to provided        ║
+║  liquidity. All USDC yield is considered common among LP participants.    ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 """
 from decimal import Decimal as D
-from ..core import create_model, model_label, User, Color, K, BankRunResult
+from ..core import create_model, model_label, User, Color, ScenarioResult
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
 # ║                          CONFIGURATION                                    ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 
-# (name, buy_amount) -- each user starts with 3K USDC
-USERS_DATA: list[tuple[str, D]] = [
-    ("Aaron", D(500)), ("Bob", D(400)), ("Carl", D(300)), ("Dennis", D(600)),
-    ("Eve", D(350)), ("Frank", D(450)), ("Grace", D(550)),
-    ("Henry", D(250)), ("Iris", D(380)), ("Jack", D(420)),
+# (name, buy_amount, lp_fraction)
+USERS_CFG: list[tuple[str, D, D]] = [
+    ("Alice", D(500), D("1.0")),    # 100% LP
+    ("Bob", D(500), D("0.5")),      # 50% LP
+    ("Carl", D(500), D("0.25")),    # 25% LP
+    ("Diana", D(500), D("0.0")),    # 0% LP (pure hold)
 ]
+
+COMPOUND_DAYS = 100
+INITIAL_USDC = D(2000)
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
-# ║                       SHARED IMPLEMENTATION                               ║
+# ║                       CORE IMPLEMENTATION                                 ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 
-def _bank_run_impl(codename: str, reverse: bool = False, verbose: bool = True) -> BankRunResult:
-    """Shared implementation for FIFO and LIFO bank run scenarios."""
+def partial_lp_scenario(codename: str, verbose: bool = True) -> ScenarioResult:
+    """Run partial LP scenario comparing different LP strategies."""
     vault, lp = create_model(codename)
     C = Color
-    label = "REVERSE BANK RUN" if reverse else "BANK RUN"
-    width = 42 if reverse else 50
-    users = {name: User(name.lower(), 3 * K) for name, _ in USERS_DATA}
-
+    
+    users = {name: User(name.lower(), INITIAL_USDC) for name, _, _ in USERS_CFG}
+    strategies: dict[str, D] = {}
+    
     if verbose:
         print(f"\n{C.BOLD}{C.HEADER}{'='*70}{C.END}")
-        print(f"{C.BOLD}{C.HEADER}  {label} - {model_label(codename):^{width}}{C.END}")
+        print(f"{C.BOLD}{C.HEADER}  PARTIAL LP - {model_label(codename):^50}{C.END}")
         print(f"{C.BOLD}{C.HEADER}{'='*70}{C.END}\n")
 
     # ┌───────────────────────────────────────────────────────────────────────┐
-    # │       Entry: Everyone Buys Tokens and Provides Liquidity              │
+    # │                    Entry: Buy + Partial LP                            │
     # └───────────────────────────────────────────────────────────────────────┘
-
-    for name, buy_amount in USERS_DATA:
+    
+    for name, buy_amount, lp_fraction in USERS_CFG:
         u = users[name]
+        strategies[name] = lp_fraction
+        
+        # Buy tokens
         lp.buy(u, buy_amount)
-        token_amount = u.balance_token
-        usdc_amount = token_amount * lp.price
-        lp.add_liquidity(u, token_amount, usdc_amount)
+        tokens_bought = u.balance_token
+        
+        # LP only the specified fraction
+        lp_tokens = tokens_bought * lp_fraction
+        held_tokens = tokens_bought - lp_tokens
+        
+        if lp_tokens > 0:
+            usdc_for_lp = lp_tokens * lp.price
+            lp.add_liquidity(u, lp_tokens, usdc_for_lp)
+        
         if verbose:
-            print(f"[{name}] Buy {buy_amount} + LP, Price: {C.GREEN}{lp.price:.6f}{C.END}")
-
+            lp_pct = int(lp_fraction * 100)
+            print(f"[{name}] Buy {buy_amount} -> {tokens_bought:.2f} tokens, LP {lp_pct}% ({lp_tokens:.2f}), Hold {held_tokens:.2f}")
+    
     if verbose:
-        lp.print_stats("After All Buy + LP")
+        lp.print_stats("After Entry")
 
     # ┌───────────────────────────────────────────────────────────────────────┐
-    # │              Yield Accrual: Full Year of Compounding                  │
+    # │                         Compound Period                               │
     # └───────────────────────────────────────────────────────────────────────┘
-
-    vault.compound(365)
+    
+    vault.compound(COMPOUND_DAYS)
     if verbose:
-        print(f"{C.BLUE}--- Compound 365 days ---{C.END}")
+        print(f"{C.BLUE}--- Compound {COMPOUND_DAYS} days ---{C.END}")
         print(f"  Vault: {C.YELLOW}{vault.balance_of():.2f}{C.END}, Price: {C.GREEN}{lp.price:.6f}{C.END}")
 
     # ┌───────────────────────────────────────────────────────────────────────┐
-    # │              Exit: All Users Withdraw (FIFO or LIFO)                  │
+    # │                              Exit                                     │
     # └───────────────────────────────────────────────────────────────────────┘
-
-    exit_order = reversed(USERS_DATA) if reverse else iter(USERS_DATA)
+    
     results: dict[str, D] = {}
-    winners = 0
-    losers = 0
-    for name, buy_amount in exit_order:
+    
+    for name, buy_amount, lp_fraction in USERS_CFG:
         u = users[name]
-        lp.remove_liquidity(u)
+        
+        # Remove LP if user has LP position
+        if lp_fraction > 0 and name in lp.liquidity_token:
+            lp.remove_liquidity(u)
+        
+        # Sell all held tokens
         tokens = u.balance_token
-        lp.sell(u, tokens)
-        profit = u.balance_usd - 3 * K
+        if tokens > 0:
+            lp.sell(u, tokens)
+        
+        profit = u.balance_usd - INITIAL_USDC
         results[name] = profit
-        if profit > 0:
-            winners += 1
-        else:
-            losers += 1
+        
+        roi = (profit / buy_amount) * 100
+        lp_pct = int(lp_fraction * 100)
         if verbose:
             pc = C.GREEN if profit > 0 else C.RED
-            print(f"  {name:7s}: Invested {C.YELLOW}{buy_amount}{C.END}, Profit: {pc}{profit:.2f}{C.END}")
+            print(f"  {name:6s} ({lp_pct:3d}% LP): Profit: {pc}{profit:8.2f}{C.END} ({roi:+.1f}%)")
 
     # ┌───────────────────────────────────────────────────────────────────────┐
     # │                            Summary                                    │
     # └───────────────────────────────────────────────────────────────────────┘
-
-    total_profit: D = sum(results.values(), D(0))
+    
     if verbose:
-        print(f"\n{C.BOLD}Winners: {C.GREEN}{winners}{C.END}, Losers: {C.RED}{losers}{C.END}")
-        tc = C.GREEN if total_profit > 0 else C.RED
-        print(f"{C.BOLD}Total profit: {tc}{total_profit:.2f}{C.END}")
-        print(f"Vault remaining: {C.YELLOW}{vault.balance_of():.2f}{C.END}")
+        print(f"\n{C.BOLD}Strategy Analysis:{C.END}")
+        # Sort by profit to show which strategy won
+        sorted_results = sorted(results.items(), key=lambda x: x[1], reverse=True)
+        for i, (name, profit) in enumerate(sorted_results):
+            lp_pct = int(strategies[name] * 100)
+            medal = ["🥇", "🥈", "🥉", "  "][i]
+            print(f"  {medal} {name} ({lp_pct}% LP): {C.GREEN if profit > 0 else C.RED}{profit:.2f}{C.END}")
+        
+        print(f"\nVault remaining: {C.YELLOW}{vault.balance_of():.2f}{C.END}")
 
     return {
-        "codename": codename, "profits": results,
-        "winners": winners, "losers": losers,
-        "total_profit": total_profit, "vault": vault.balance_of(),
+        "codename": codename,
+        "profits": results,
+        "vault": vault.balance_of(),
+        "strategies": strategies,
+        "losers": sum(1 for p in results.values() if p <= 0),
+        "winners": sum(1 for p in results.values() if p > 0),
+        "total_profit": sum(results.values(), D(0)),
     }
-
-
-# ╔═══════════════════════════════════════════════════════════════════════════╗
-# ║                         PUBLIC ENTRY POINT                                ║
-# ╚═══════════════════════════════════════════════════════════════════════════╝
-
-def bank_run_scenario(codename: str, verbose: bool = True) -> BankRunResult:
-    """10 users, 365 days compound, all exit sequentially."""
-    return _bank_run_impl(codename, reverse=False, verbose=verbose)
-
-
-def reverse_bank_run_scenario(codename: str, verbose: bool = True) -> BankRunResult:
-    """10 users, 365 days compound, all exit sequentially — REVERSE order."""
-    return _bank_run_impl(codename, reverse=True, verbose=verbose)

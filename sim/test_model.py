@@ -26,10 +26,10 @@ from typing import Union, cast
 
 from .core import (
     MODELS, ACTIVE_MODELS, CURVE_NAMES, Color,
-    SingleUserResult, MultiUserResult, BankRunResult,
+    SingleUserResult, MultiUserResult, BankRunResult, ScenarioResult as CoreScenarioResult,
 )
 
-ScenarioResult = Union[SingleUserResult, MultiUserResult, BankRunResult]
+ScenarioResult = Union[SingleUserResult, MultiUserResult, BankRunResult, CoreScenarioResult]
 
 from .scenarios import (
     single_user_scenario,
@@ -37,6 +37,14 @@ from .scenarios import (
     bank_run_scenario,
     reverse_multi_user_scenario,
     reverse_bank_run_scenario,
+    hold_before_scenario,
+    hold_with_scenario,
+    hold_after_scenario,
+    late_90_scenario,
+    late_180_scenario,
+    partial_lp_scenario,
+    whale_scenario,
+    real_life_scenario,
 )
 
 
@@ -65,6 +73,14 @@ def run_comparison(codenames: list[str]) -> None:
             "bank": bank_run_scenario(code, verbose=False),
             "rmulti": reverse_multi_user_scenario(code, verbose=False),
             "rbank": reverse_bank_run_scenario(code, verbose=False),
+            "hold_before": hold_before_scenario(code, verbose=False),
+            "hold_with": hold_with_scenario(code, verbose=False),
+            "hold_after": hold_after_scenario(code, verbose=False),
+            "late_90": late_90_scenario(code, verbose=False),
+            "late_180": late_180_scenario(code, verbose=False),
+            "partial": partial_lp_scenario(code, verbose=False),
+            "whale": whale_scenario(code, verbose=False),
+            "real": real_life_scenario(code, verbose=False),
         }
     
     print(f"\r{' ' * 30}\r", end="")
@@ -75,25 +91,35 @@ def run_comparison(codenames: list[str]) -> None:
 
     curve_abbr = {"Constant Product": "CP", "Exponential": "Exp", "Sigmoid": "Sig", "Logarithmic": "Log"}
     
-    def fmt_profit(val: D | float, width: int = 7, decimals: int = 0) -> str:
-        v = float(val)
-        fmt = f">{width}.{decimals}f"
-        if v > 0:
-            return f"{C.GREEN}{v:{fmt}}{C.END}"
-        elif v < 0:
-            return f"{C.RED}{v:{fmt}}{C.END}"
-        return f"{v:{fmt}}"
+    def fmt_profit(val: D, width: int = 7, decimals: int = 0) -> str:
+        """Format profit with color and underscore separators."""
+        num = int(val) if decimals == 0 else float(val)
+        if decimals == 0:
+            # Format with underscores, then pad to width
+            raw = f"{num:,}".replace(",", "_")
+            formatted = f"{raw:>{width}}"
+        else:
+            formatted = f"{num:>{width}.{decimals}f}"
+        if val > 0:
+            return f"{C.GREEN}{formatted}{C.END}"
+        elif val < 0:
+            return f"{C.RED}{formatted}{C.END}"
+        return formatted
     
     def fmt_losers(n: int, width: int = 2) -> str:
+        formatted = f"{n:>{width}d}"
         if n > 0:
-            return f"{C.RED}{n:>{width}d}{C.END}"
-        return f"{n:>{width}d}"
+            return f"{C.RED}{formatted}{C.END}"
+        return formatted
     
-    def fmt_vault(val: D | float, width: int = 5) -> str:
-        rounded = round(val, 2)
-        if rounded != D(0):
-            return f"{C.YELLOW}{float(val):>{width}.0f}{C.END}"
-        return f"{float(val):>{width}.0f}"
+    def fmt_vault(val: D, width: int = 6) -> str:
+        """Format vault with color and underscore separators."""
+        displayed = round(float(val))
+        raw = f"{displayed:,}".replace(",", "_")
+        formatted = f"{raw:>{width}}"
+        if displayed != 0:
+            return f"{C.YELLOW}{formatted}{C.END}"
+        return formatted
     
     # ┌───────────────────────────────────────────────────────────────────────┐
     # │                           Table Header                                │
@@ -101,7 +127,7 @@ def run_comparison(codenames: list[str]) -> None:
 
     print()
     print(f"{C.BOLD}{C.HEADER}{'='*60}{C.END}")
-    print(f"{C.BOLD}{C.HEADER}  MODEL COMPARISON - FIFO vs LIFO {C.END}")
+    print(f"{C.BOLD}{C.HEADER}  MODEL COMPARISON{C.END}")
     print(f"{C.BOLD}{C.HEADER}{'='*60}{C.END}")
     print()
     
@@ -113,8 +139,9 @@ def run_comparison(codenames: list[str]) -> None:
         model_hdrs.append(f"{code}({curve})")
     
     # Sub-column widths: +(gains) -(losses) #(losers) V(vault)
-    GAIN_W, LOSS_W, NUM_W, VLT_W = 5, 5, 2, 4
-    CELL_W = 24
+    GAIN_W, LOSS_W, NUM_W, VLT_W = 7, 7, 2, 6
+    # Cell width = 1(space) + GAIN_W + 2(spaces) + LOSS_W + 2(spaces) + NUM_W + 2(spaces) + VLT_W + 1(space)
+    CELL_W = 1 + GAIN_W + 2 + LOSS_W + 2 + NUM_W + 2 + VLT_W + 1  # = 30
     
     hdr = f"  {'Scenario':<12}│"
     for mh in model_hdrs:
@@ -142,10 +169,18 @@ def run_comparison(codenames: list[str]) -> None:
 
     scenarios = [
         ("single", "Single", False),       # solo user — no losers column
-        ("multi", "Multi FIFO", True),      # group scenarios show gain/loss/losers/vault
-        ("bank", "Bank FIFO", True),
-        ("rmulti", "Multi LIFO", True),
-        ("rbank", "Bank LIFO", True),
+        ("multi", "Multi", True),           # group scenarios show gain/loss/losers/vault
+        ("rmulti", "Multi R", True),
+        ("bank", "Bank", True),
+        ("rbank", "Bank R", True),
+        ("hold_before", "Hold Before", True),
+        ("hold_with", "Hold With", True),
+        ("hold_after", "Hold After", True),
+        ("late_90", "Late 90d", True),
+        ("late_180", "Late 180d", True),
+        ("partial", "Partial LP", True),
+        ("whale", "Whale", True),
+        ("real", "Real Life", True),
     ]
     
     for scenario_key, scenario_label, is_group in scenarios:
@@ -165,8 +200,8 @@ def run_comparison(codenames: list[str]) -> None:
                 # Group scenarios: aggregate gains, losses, loser count
                 r = cast(Union[MultiUserResult, BankRunResult], result)
                 profits = list(r["profits"].values())
-                plus = sum(p for p in profits if p > 0)
-                minus = sum(p for p in profits if p < 0)
+                plus = sum((p for p in profits if p > 0), D(0))
+                minus = sum((p for p in profits if p < 0), D(0))
                 bank = cast(BankRunResult, result)
                 losers = bank.get("losers", sum(1 for p in profits if p <= 0))
 
@@ -205,6 +240,11 @@ Examples:
   python test_model.py --bank CYN,EYN     # Bank run scenario for specific models
   python test_model.py --rmulti           # Reverse multi-user (last buyer exits first)
   python test_model.py --rbank            # Reverse bank run (last buyer exits first)
+  python test_model.py --hold CYN         # Hold scenario (passive holder dilution)
+  python test_model.py --late CYN         # Late entrant scenario (first-mover advantage)
+  python test_model.py --partial CYN      # Partial LP scenario (mixed strategies)
+  python test_model.py --whale CYN        # Whale entry scenario (concentration/slippage)
+  python test_model.py --real CYN         # Real life scenario (continuous flow)
 """
     )
     parser.add_argument(
@@ -235,6 +275,26 @@ Examples:
         "--rbank", action="store_true",
         help="Run reverse bank run scenario (LIFO exit order)"
     )
+    parser.add_argument(
+        "--hold", action="store_true",
+        help="Run hold scenarios (passive holder before/with/after LPers)"
+    )
+    parser.add_argument(
+        "--late", action="store_true",
+        help="Run late entrant scenarios (90d and 180d wait periods)"
+    )
+    parser.add_argument(
+        "--partial", action="store_true",
+        help="Run partial LP scenario (heterogeneous LP strategies)"
+    )
+    parser.add_argument(
+        "--whale", action="store_true",
+        help="Run whale entry scenario (concentration/slippage test)"
+    )
+    parser.add_argument(
+        "--real", action="store_true",
+        help="Run real life scenario (continuous entry/exit flow)"
+    )
     
     args = parser.parse_args()
     
@@ -261,7 +321,15 @@ Examples:
     run_bank = args.bank
     run_rmulti = args.rmulti
     run_rbank = args.rbank
-    run_all = not (run_single or run_multi or run_bank or run_rmulti or run_rbank)
+    run_hold = args.hold
+    run_late = args.late
+    run_partial = args.partial
+    run_whale = args.whale
+    run_real = args.real
+    
+    any_flag = (run_single or run_multi or run_bank or run_rmulti or run_rbank or
+                run_hold or run_late or run_partial or run_whale or run_real)
+    run_all = not any_flag
     
     verbose = len(codes) == 1
     
@@ -281,4 +349,16 @@ Examples:
                 reverse_multi_user_scenario(code, verbose=True)
             if run_rbank or run_all:
                 reverse_bank_run_scenario(code, verbose=True)
-
+            if run_hold or run_all:
+                hold_before_scenario(code, verbose=True)
+                hold_with_scenario(code, verbose=True)
+                hold_after_scenario(code, verbose=True)
+            if run_late or run_all:
+                late_90_scenario(code, verbose=True)
+                late_180_scenario(code, verbose=True)
+            if run_partial or run_all:
+                partial_lp_scenario(code, verbose=True)
+            if run_whale or run_all:
+                whale_scenario(code, verbose=True)
+            if run_real or run_all:
+                real_life_scenario(code, verbose=True)

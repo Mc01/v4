@@ -3,7 +3,6 @@ Commonwealth Protocol - Core Infrastructure
 
 Contains all core classes, constants, and utilities used by test_model.py and scenarios.
 """
-import math
 from decimal import Decimal as D
 from typing import Callable, Dict, List, Optional, Tuple, TypedDict
 from enum import Enum
@@ -28,15 +27,15 @@ VAULT_APY = D(5) / D(100)
 # │ Curve-Specific Tuning (calibrated for ~500 USDC test buys)                │
 # └───────────────────────────────────────────────────────────────────────────┘
 
-EXP_BASE_PRICE = 1.0
-EXP_K = 0.0002             # 500 USDC -> ~477 tokens
+EXP_BASE_PRICE = D(1)
+EXP_K = D("0.0002")         # 500 USDC -> ~477 tokens
 
-SIG_MAX_PRICE = 2.0
-SIG_K = 0.001               # 500 USDC -> ~450 tokens
-SIG_MIDPOINT = 0.0
+SIG_MAX_PRICE = D(2)
+SIG_K = D("0.001")          # 500 USDC -> ~450 tokens
+SIG_MIDPOINT = D(0)
 
-LOG_BASE_PRICE = 1.0
-LOG_K = 0.01                # 500 USDC -> ~510 tokens
+LOG_BASE_PRICE = D(1)
+LOG_K = D("0.01")           # 500 USDC -> ~510 tokens
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -183,7 +182,7 @@ class UserSnapshot:
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
 # ║                       INTEGRAL CURVE MATH                                 ║
-# ║                    (float-based for exp/log/trig)                         ║
+# ║                    (Decimal-based for precision)                          ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 #
 # Each curve defines:
@@ -192,74 +191,74 @@ class UserSnapshot:
 #
 # These are used by LP.buy/sell to compute token amounts for a given USDC cost.
 
+# Maximum exponent argument to prevent overflow (Decimal can handle more than float)
+MAX_EXP_ARG = D(700)
+
 
 # ┌─────────────────────────────────────┐
 # │      Exponential Curve              │
 # └─────────────────────────────────────┘
 
-def _exp_integral(a: float, b: float) -> float:
+def _exp_integral(a: D, b: D) -> D:
     """Integral of base * e^(k*x) from a to b."""
-    MAX_EXP_ARG = 700
     exp_b_arg = EXP_K * b
     exp_a_arg = EXP_K * a
     
     if exp_b_arg > MAX_EXP_ARG:
-        return float('inf')
+        return D('Inf')
     
-    return (EXP_BASE_PRICE / EXP_K) * (math.exp(exp_b_arg) - math.exp(exp_a_arg))
+    return (EXP_BASE_PRICE / EXP_K) * (exp_b_arg.exp() - exp_a_arg.exp())
 
-def _exp_price(s: float) -> float:
-    MAX_EXP_ARG = 700
+def _exp_price(s: D) -> D:
     if EXP_K * s > MAX_EXP_ARG:
-        return float('inf')
-    return EXP_BASE_PRICE * math.exp(EXP_K * s)
+        return D('Inf')
+    return EXP_BASE_PRICE * (EXP_K * s).exp()
 
 
 # ┌─────────────────────────────────────┐
 # │         Sigmoid Curve               │
 # └─────────────────────────────────────┘
 
-def _sig_integral(a: float, b: float) -> float:
+def _sig_integral(a: D, b: D) -> D:
     """Integral of max_p / (1 + e^(-k*(x-m))) from a to b."""
-    MAX_EXP_ARG = 700
-    def F(x: float) -> float:
+    def F(x: D) -> D:
         arg = SIG_K * (x - SIG_MIDPOINT)
         if arg > MAX_EXP_ARG:
             return (SIG_MAX_PRICE / SIG_K) * arg
-        return (SIG_MAX_PRICE / SIG_K) * math.log(1 + math.exp(arg))
+        return (SIG_MAX_PRICE / SIG_K) * (D(1) + arg.exp()).ln()
     return F(b) - F(a)
 
-def _sig_price(s: float) -> float:
-    return SIG_MAX_PRICE / (1 + math.exp(-SIG_K * (s - SIG_MIDPOINT)))
+def _sig_price(s: D) -> D:
+    return SIG_MAX_PRICE / (D(1) + (-SIG_K * (s - SIG_MIDPOINT)).exp())
 
 
 # ┌─────────────────────────────────────┐
 # │       Logarithmic Curve             │
 # └─────────────────────────────────────┘
 
-def _log_integral(a: float, b: float) -> float:
+def _log_integral(a: D, b: D) -> D:
     """Integral of base * ln(1 + k*x) from a to b."""
-    def F(x: float) -> float:
-        u = 1 + LOG_K * x
+    def F(x: D) -> D:
+        u = D(1) + LOG_K * x
         if u <= 0:
-            return 0.0
-        return LOG_BASE_PRICE * ((u * math.log(u) - u) / LOG_K + x)
+            return D(0)
+        return LOG_BASE_PRICE * ((u * u.ln() - u) / LOG_K + x)
     return F(b) - F(a)
 
-def _log_price(s: float) -> float:
-    val = 1 + LOG_K * s
-    return LOG_BASE_PRICE * math.log(val) if val > 0 else 0.0
+def _log_price(s: D) -> D:
+    val = D(1) + LOG_K * s
+    return LOG_BASE_PRICE * val.ln() if val > 0 else D(0)
 
 
 # ┌─────────────────────────────────────┐
 # │     Binary Search for Tokens        │
 # └─────────────────────────────────────┘
 
-def _bisect_tokens_for_cost(supply: float, cost: float, integral_fn: Callable[[float, float], float], max_tokens: float = 1e9) -> float:
+def _bisect_tokens_for_cost(supply: D, cost: D, integral_fn: Callable[[D, D], D], max_tokens: D = D("1e9")) -> D:
     """Binary search: find n tokens where integral(supply, supply+n) = cost."""
     if cost <= 0:
-        return 0.0
-    lo, hi = 0.0, min(max_tokens, 1e8)
+        return D(0)
+    lo, hi = D(0), min(max_tokens, D("1e8"))
     while integral_fn(supply, supply + hi) < cost and hi < max_tokens:
         hi *= 2
     for _ in range(100):
@@ -383,7 +382,7 @@ class LP:
             return usdc_reserve / token_reserve
         else:
             # Integral curves: base curve price at current supply, scaled by multiplier
-            s = float(self.minted)
+            s = self.minted
             if self.curve_type == CurveType.EXPONENTIAL:
                 base = _exp_price(s)
             elif self.curve_type == CurveType.SIGMOID:
@@ -391,8 +390,8 @@ class LP:
             elif self.curve_type == CurveType.LOGARITHMIC:
                 base = _log_price(s)
             else:
-                base = 1.0
-            return D(str(base)) * self._get_price_multiplier()
+                base = D(1)
+            return base * self._get_price_multiplier()
 
     # ┌───────────────────────────────────────────────────────────────────────┐
     # │         Fair Share: Caps Withdrawals to Prevent Vault Drain           │
@@ -452,18 +451,17 @@ class LP:
             out_amount = token_reserve - new_token
         else:
             # Integral curves: divide cost by multiplier, bisect for token count
-            mult = float(self._get_price_multiplier())
-            effective_cost = float(amount) / mult if mult > 0 else float(amount)
-            supply = float(self.minted)
+            mult = self._get_price_multiplier()
+            effective_cost = amount / mult if mult > 0 else amount
+            supply = self.minted
             if self.curve_type == CurveType.EXPONENTIAL:
-                n = _bisect_tokens_for_cost(supply, effective_cost, _exp_integral)
+                out_amount = _bisect_tokens_for_cost(supply, effective_cost, _exp_integral)
             elif self.curve_type == CurveType.SIGMOID:
-                n = _bisect_tokens_for_cost(supply, effective_cost, _sig_integral)
+                out_amount = _bisect_tokens_for_cost(supply, effective_cost, _sig_integral)
             elif self.curve_type == CurveType.LOGARITHMIC:
-                n = _bisect_tokens_for_cost(supply, effective_cost, _log_integral)
+                out_amount = _bisect_tokens_for_cost(supply, effective_cost, _log_integral)
             else:
-                n = float(amount)
-            out_amount = D(str(n))
+                out_amount = amount
 
         self.mint(out_amount)
         self.balance_token -= out_amount
@@ -506,8 +504,8 @@ class LP:
             self.minted -= amount
         else:
             self.minted -= amount
-            supply_after = float(self.minted)
-            supply_before = supply_after + float(amount)
+            supply_after = self.minted
+            supply_before = supply_after + amount
             if self.curve_type == CurveType.EXPONENTIAL:
                 base_return = _exp_integral(supply_after, supply_before)
             elif self.curve_type == CurveType.SIGMOID:
@@ -515,8 +513,8 @@ class LP:
             elif self.curve_type == CurveType.LOGARITHMIC:
                 base_return = _log_integral(supply_after, supply_before)
             else:
-                base_return = float(amount)
-            raw_out = D(str(base_return)) * self._get_price_multiplier()
+                base_return = amount
+            raw_out = base_return * self._get_price_multiplier()
 
         # Cap output to fair share of vault
         original_minted = self.minted + amount
@@ -676,6 +674,22 @@ class BankRunResult(TypedDict):
     losers: int
     total_profit: D
     vault: D
+
+
+class ScenarioResult(TypedDict, total=False):
+    """Unified result type for new scenarios. Uses total=False for optional fields."""
+    # Required fields (always present)
+    codename: str
+    profits: Dict[str, D]
+    vault: D
+    
+    # Optional metadata (scenario-specific)
+    winners: Optional[int]
+    losers: Optional[int]
+    total_profit: Optional[D]
+    strategies: Optional[Dict[str, D]]     # LP fraction per user (partial_lp)
+    entry_prices: Optional[Dict[str, D]]   # Price when user entered (late)
+    timeline: Optional[List[str]]          # Event log (real_life)
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗

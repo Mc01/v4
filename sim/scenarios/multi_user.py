@@ -19,10 +19,10 @@ from ..core import create_model, model_label, User, Color, MultiUserResult
 
 # (name, buy_amount, initial_usdc)
 USERS_CFG: list[tuple[str, D, D]] = [
-    ("Aaron", D(500), D(2000)),
-    ("Bob", D(400), D(2000)),
-    ("Carl", D(300), D(2000)),
-    ("Dennis", D(600), D(2000)),
+    ("Aaron", D(500), D(2_000)),
+    ("Bob", D(400), D(2_000)),
+    ("Carl", D(300), D(2_000)),
+    ("Dennis", D(600), D(2_000)),
 ]
 
 COMPOUND_INTERVAL = 50
@@ -121,3 +121,8 @@ def _multi_user_impl(codename: str, reverse: bool = False, verbose: bool = True)
 def multi_user_scenario(codename: str, verbose: bool = True) -> MultiUserResult:
     """4 users, staggered exits over 200 days."""
     return _multi_user_impl(codename, reverse=False, verbose=verbose)
+
+
+def reverse_multi_user_scenario(codename: str, verbose: bool = True) -> MultiUserResult:
+    """4 users, staggered exits over 200 days — REVERSE exit order."""
+    return _multi_user_impl(codename, reverse=True, verbose=verbose)
