@@ -68,19 +68,19 @@ def run_comparison(codenames: list[str]) -> None:
     model_results: dict[str, dict[str, ScenarioResult]] = {}
     for code in codenames:
         model_results[code] = {
-            "single": single_user_scenario(code, verbose=False),
-            "multi": multi_user_scenario(code, verbose=False),
-            "bank": bank_run_scenario(code, verbose=False),
-            "rmulti": reverse_multi_user_scenario(code, verbose=False),
-            "rbank": reverse_bank_run_scenario(code, verbose=False),
-            "hold_before": hold_before_scenario(code, verbose=False),
-            "hold_with": hold_with_scenario(code, verbose=False),
-            "hold_after": hold_after_scenario(code, verbose=False),
-            "late_90": late_90_scenario(code, verbose=False),
-            "late_180": late_180_scenario(code, verbose=False),
-            "partial": partial_lp_scenario(code, verbose=False),
-            "whale": whale_scenario(code, verbose=False),
-            "real": real_life_scenario(code, verbose=False),
+            "single": single_user_scenario(code, verbosity=0),
+            "multi": multi_user_scenario(code, verbosity=0),
+            "bank": bank_run_scenario(code, verbosity=0),
+            "rmulti": reverse_multi_user_scenario(code, verbosity=0),
+            "rbank": reverse_bank_run_scenario(code, verbosity=0),
+            "hold_before": hold_before_scenario(code, verbosity=0),
+            "hold_with": hold_with_scenario(code, verbosity=0),
+            "hold_after": hold_after_scenario(code, verbosity=0),
+            "late_90": late_90_scenario(code, verbosity=0),
+            "late_180": late_180_scenario(code, verbosity=0),
+            "partial": partial_lp_scenario(code, verbosity=0),
+            "whale": whale_scenario(code, verbosity=0),
+            "real": real_life_scenario(code, verbosity=0),
         }
     
     print(f"\r{' ' * 30}\r", end="")
@@ -295,6 +295,10 @@ Examples:
         "--real", action="store_true",
         help="Run real life scenario (continuous entry/exit flow)"
     )
+    parser.add_argument(
+        "-v", "--verbose", action="count", default=0,
+        help="Verbosity level: -v (VERBOSE), -vv (DEBUG). Default: NORMAL."
+    )
     
     args = parser.parse_args()
     
@@ -332,33 +336,60 @@ Examples:
     run_all = not any_flag
     
     verbose = len(codes) == 1
+    verbosity = args.verbose  # 1, 2, or 3
     
     # Show comparison table only when no specific flags and multiple models
     if run_all and not verbose:
         run_comparison(codes)
     else:
         # Run requested scenarios (verbose for all models when flags specified)
+        # Default to 1 (Normal) if no flags, otherwise use flag count
+        # -v (1) -> 1 (Normal)
+        # -vv (2) -> 2 (Verbose)
+        # -vvv (3) -> 3 (Debug)
+        v = args.verbose if args.verbose > 0 else 1
+    
+    # Run specific scenario if flags provided
+    if args.single:
         for code in codes:
-            if run_single or run_all:
-                single_user_scenario(code, verbose=True)
-            if run_multi or run_all:
-                multi_user_scenario(code, verbose=True)
-            if run_bank or run_all:
-                bank_run_scenario(code, verbose=True)
-            if run_rmulti or run_all:
-                reverse_multi_user_scenario(code, verbose=True)
-            if run_rbank or run_all:
-                reverse_bank_run_scenario(code, verbose=True)
-            if run_hold or run_all:
-                hold_before_scenario(code, verbose=True)
-                hold_with_scenario(code, verbose=True)
-                hold_after_scenario(code, verbose=True)
-            if run_late or run_all:
-                late_90_scenario(code, verbose=True)
-                late_180_scenario(code, verbose=True)
-            if run_partial or run_all:
-                partial_lp_scenario(code, verbose=True)
-            if run_whale or run_all:
-                whale_scenario(code, verbose=True)
-            if run_real or run_all:
-                real_life_scenario(code, verbose=True)
+            single_user_scenario(code, verbosity=v)
+
+    if args.multi:
+        for code in codes:
+            multi_user_scenario(code, verbosity=v)
+
+    if args.bank:
+        for code in codes:
+            bank_run_scenario(code, verbosity=v)
+
+    if args.rmulti:
+        for code in codes:
+            reverse_multi_user_scenario(code, verbosity=v)
+
+    if args.rbank:
+        for code in codes:
+            reverse_bank_run_scenario(code, verbosity=v)
+
+    if args.hold:
+        for code in codes:
+            # All 3 hold variants for now
+            hold_before_scenario(code, verbosity=v)
+            hold_with_scenario(code, verbosity=v)
+            hold_after_scenario(code, verbosity=v)
+
+    if args.late:
+        for code in codes:
+            late_90_scenario(code, verbosity=v)
+            late_180_scenario(code, verbosity=v)
+
+    if args.partial:
+        for code in codes:
+            partial_lp_scenario(code, verbosity=v)
+        
+    if args.whale:
+        for code in codes:
+            whale_scenario(code, verbosity=v)
+
+    if args.real:
+        for code in codes:
+            real_life_scenario(code, verbosity=v)

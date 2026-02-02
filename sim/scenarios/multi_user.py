@@ -1,128 +1,120 @@
 """
 ╔═══════════════════════════════════════════════════════════════════════════╗
-║                   Multi-User Scenario (FIFO)                              ║
+║                     Multi-User Scenario (FIFO/LIFO)                       ║
 ╠═══════════════════════════════════════════════════════════════════════════╣
-║  4 users enter sequentially, then exit in the same order (FIFO):          ║
-║    1. All users buy tokens and add liquidity                              ║
-║    2. Every 50 days, one user exits (Aaron first, Dennis last)            ║
-║                                                                           ║
-║  Tests fairness across multiple participants with staggered exits.        ║
+║  4 users enter, compound, then exit in staggered intervals.               ║
+║  Tests yield distribution and exit timing effects.                        ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 """
 from decimal import Decimal as D
-from ..core import create_model, model_label, User, Color, MultiUserResult
+from ..core import create_model, model_label, User, K, MultiUserResult
+from ..formatter import Formatter, fmt
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
 # ║                          CONFIGURATION                                    ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 
-# (name, buy_amount, initial_usdc)
+# (name, buy_amount, initial_balance)
 USERS_CFG: list[tuple[str, D, D]] = [
-    ("Aaron", D(500), D(2_000)),
-    ("Bob", D(400), D(2_000)),
-    ("Carl", D(300), D(2_000)),
-    ("Dennis", D(600), D(2_000)),
+    ("Alice", D(500), 1 * K),
+    ("Bob", D(500), 2 * K),
+    ("Carl", D(500), 3 * K),
+    ("Diana", D(500), 4 * K),
 ]
 
-COMPOUND_INTERVAL = 50
+# Exit schedule: day of exit for each user (FIFO order)
+EXIT_DAYS = [100, 130, 160, 200]
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
 # ║                       SHARED IMPLEMENTATION                               ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 
-def _multi_user_impl(codename: str, reverse: bool = False, verbose: bool = True) -> MultiUserResult:
+def _multi_user_impl(codename: str, reverse: bool = False, verbosity: int = 1) -> MultiUserResult:
     """Shared implementation for FIFO and LIFO multi-user scenarios."""
     vault, lp = create_model(codename)
-    C = Color
-    label = "REVERSE MULTI-USER" if reverse else "MULTI-USER"
-    width = 40 if reverse else 48
+    f = Formatter(verbosity)
+    f.set_lp(lp)
+    label = "MULTI-USER (LIFO)" if reverse else "MULTI-USER (FIFO)"
     users = {name: User(name.lower(), initial) for name, _, initial in USERS_CFG}
+    total_users = len(USERS_CFG)
 
-    if verbose:
-        print(f"\n{C.BOLD}{C.HEADER}{'='*70}{C.END}")
-        print(f"{C.BOLD}{C.HEADER}  {label} - {model_label(codename):^{width}}{C.END}")
-        print(f"{C.BOLD}{C.HEADER}{'='*70}{C.END}\n")
+    f.header(label, model_label(codename))
 
     # ┌───────────────────────────────────────────────────────────────────────┐
-    # │       Entry: Everyone Buys Tokens and Provides Liquidity              │
+    # │         Entry: All Users Buy Tokens and Provide Liquidity             │
     # └───────────────────────────────────────────────────────────────────────┘
 
-    for name, buy_amount, _ in USERS_CFG:
+    f.section("Entry Phase")
+    
+    for i, (name, buy_amount, _) in enumerate(USERS_CFG, 1):
         u = users[name]
+        price_before = lp.price
         lp.buy(u, buy_amount)
-        if verbose:
-            print(f"[{name} Buy] {buy_amount} USDC -> {C.YELLOW}{u.balance_token:.2f}{C.END} tokens, Price: {C.GREEN}{lp.price:.6f}{C.END}")
+        price_after = lp.price
+        tokens = u.balance_token
+        usdc_amount = tokens * lp.price
+        lp.add_liquidity(u, tokens, usdc_amount)
+        
+        f.buy(i, total_users, name, buy_amount, price_before, tokens, price_after)
 
-        token_amount = u.balance_token
-        usdc_amount = token_amount * lp.price
-        lp.add_liquidity(u, token_amount, usdc_amount)
-        if verbose:
-            print(f"[{name} LP] {token_amount:.2f} tokens + {usdc_amount:.2f} USDC")
-
-    if verbose:
-        lp.print_stats("After All Buy + LP")
+    f.stats("After All Entry", lp, level=1)
 
     # ┌───────────────────────────────────────────────────────────────────────┐
-    # │      Staggered Exits: One User Leaves Every 50 Days (FIFO/LIFO)       │
+    # │       Staggered Exits: Users Leave at Different Time Points           │
     # └───────────────────────────────────────────────────────────────────────┘
 
+    f.section("Exit Phase")
+    
     exit_order = list(reversed(USERS_CFG)) if reverse else list(USERS_CFG)
+    exit_days = list(reversed(EXIT_DAYS)) if reverse else EXIT_DAYS
+    
     results: dict[str, D] = {}
-    for i, (name, buy_amount, initial) in enumerate(exit_order):
-        vault.compound(COMPOUND_INTERVAL)
-        day = (i + 1) * COMPOUND_INTERVAL
+    prev_day = 0
+    
+    for i, ((name, buy_amount, initial), day) in enumerate(zip(exit_order, exit_days), 1):
+        days_to_add = day - prev_day
+        if days_to_add > 0:
+            vault_before = vault.balance_of()
+            price_before = lp.price
+            vault.compound(days_to_add)
+            f.compound(days_to_add, vault_before, vault.balance_of(), price_before, lp.price)
+        prev_day = day
+        
         u = users[name]
-
-        if verbose:
-            print(f"\n{C.CYAN}=== {name} Exit (day {day}) ==={C.END}")
-
-        usdc_before = u.balance_usd
+        price_before = lp.price
+        
         lp.remove_liquidity(u)
-        usdc_from_lp = u.balance_usd - usdc_before
-
-        tokens = u.balance_token
-        usdc_before_sell = u.balance_usd
-        lp.sell(u, tokens)
-        usdc_from_sell = u.balance_usd - usdc_before_sell
-
+        lp.sell(u, u.balance_token)
+        price_after = lp.price
+        
         profit = u.balance_usd - initial
         results[name] = profit
+        roi = (profit / buy_amount) * 100
+        
+        f.exit(i, total_users, name, profit, price_before, price_after, roi=roi)
 
-        if verbose:
-            gc = C.GREEN if profit > 0 else C.RED
-            print(f"  LP USDC: {C.YELLOW}{usdc_from_lp:.2f}{C.END}, Sell: {C.YELLOW}{usdc_from_sell:.2f}{C.END}")
-            print(f"  Final: {C.YELLOW}{u.balance_usd:.2f}{C.END}, Profit: {gc}{profit:.2f}{C.END}")
+    f.summary(results, vault.balance_of(), title=f"{label} SUMMARY")
 
-    # ┌───────────────────────────────────────────────────────────────────────┐
-    # │       Summary: Always Printed in Entry Order for Comparability        │
-    # └───────────────────────────────────────────────────────────────────────┘
-
-    if verbose:
-        print(f"\n{C.BOLD}{C.HEADER}=== FINAL SUMMARY ==={C.END}")
-        total: D = D(0)
-        for name, buy_amount, initial in USERS_CFG:
-            p: D = results[name]
-            total += p
-            pc = C.GREEN if p > 0 else C.RED
-            print(f"  {name:7s}: Invested {C.YELLOW}{buy_amount}{C.END}, Profit: {pc}{p:.2f}{C.END}")
-        tc = C.GREEN if total > 0 else C.RED
-        print(f"\n  {C.BOLD}Total profit: {tc}{total:.2f}{C.END}")
-        print(f"  Vault remaining: {C.YELLOW}{vault.balance_of():.2f}{C.END}")
-
-    return {"codename": codename, "profits": results, "vault": vault.balance_of()}
+    return {
+        "codename": codename,
+        "profits": results,
+        "vault": vault.balance_of(),
+    }
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
-# ║                         PUBLIC ENTRY POINT                                ║
+# ║                         PUBLIC API                                        ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 
-def multi_user_scenario(codename: str, verbose: bool = True) -> MultiUserResult:
-    """4 users, staggered exits over 200 days."""
-    return _multi_user_impl(codename, reverse=False, verbose=verbose)
+def multi_user_scenario(codename: str, verbosity: int = 1, verbose: bool = True) -> MultiUserResult:
+    """FIFO exit: first buyer exits first."""
+    v = verbosity if verbose else 0
+    return _multi_user_impl(codename, reverse=False, verbosity=v)
 
 
-def reverse_multi_user_scenario(codename: str, verbose: bool = True) -> MultiUserResult:
-    """4 users, staggered exits over 200 days — REVERSE exit order."""
-    return _multi_user_impl(codename, reverse=True, verbose=verbose)
+def reverse_multi_user_scenario(codename: str, verbosity: int = 1, verbose: bool = True) -> MultiUserResult:
+    """LIFO exit: last buyer exits first."""
+    v = verbosity if verbose else 0
+    return _multi_user_impl(codename, reverse=True, verbosity=v)

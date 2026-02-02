@@ -1,20 +1,18 @@
 """
 ╔═══════════════════════════════════════════════════════════════════════════╗
-║                    Hold Without LP Scenario                               ║
+║                     Hold Scenario (Passive Holder)                        ║
 ╠═══════════════════════════════════════════════════════════════════════════╣
-║  Tests passive holder dilution from token inflation.                      ║
-║                                                                           ║
-║  When a user buys tokens but doesn't LP, their USDC goes into the vault   ║
-║  benefiting LPers, but they receive no yield tokens. Three timing         ║
-║  variants test whether entry timing affects dilution:                     ║
-║    - hold_before: Passive enters 90d before LPers                         ║
-║    - hold_with: Passive enters with LPers                                 ║
-║    - hold_after: Passive enters 90d after LPers                           ║
+║  Tests passive holder behavior relative to LP providers.                  ║
+║  Three variants:                                                          ║
+║    - BEFORE: Passive holder buys before LPers enter                       ║
+║    - WITH:   Passive holder buys at same time as LPers                    ║
+║    - AFTER:  Passive holder buys after LPers have entered                 ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 """
 from decimal import Decimal as D
 from typing import Literal
-from ..core import create_model, model_label, User, Color, ScenarioResult
+from ..core import create_model, model_label, User, K, ScenarioResult
+from ..formatter import Formatter, fmt
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -22,190 +20,164 @@ from ..core import create_model, model_label, User, Color, ScenarioResult
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 
 LP_USERS: list[tuple[str, D]] = [
-    ("Alice", D(500)),
     ("Bob", D(500)),
     ("Carl", D(500)),
     ("Diana", D(500)),
 ]
 
-PASSIVE_USER = ("Passive", D(500))
+PASSIVE_USER = ("Alice", D(500))  # Holds tokens, no LP
 COMPOUND_DAYS = 100
-OFFSET_DAYS = 90
-INITIAL_USDC = D(2000)
 
 HoldVariant = Literal["before", "with", "after"]
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
-# ║                       CORE IMPLEMENTATION                                 ║
+# ║                       SHARED IMPLEMENTATION                               ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 
-def _hold_impl(codename: str, variant: HoldVariant, verbose: bool = True) -> ScenarioResult:
-    """Run hold scenario with specified timing variant."""
+def _hold_impl(codename: str, variant: HoldVariant, verbosity: int = 1) -> ScenarioResult:
+    """Shared implementation for all hold variants."""
     vault, lp = create_model(codename)
-    C = Color
-    variant_labels = {"before": "BEFORE", "with": "WITH", "after": "AFTER"}
-    label = f"HOLD ({variant_labels[variant]} LPers)"
+    f = Formatter(verbosity)
+    f.set_lp(lp)
+    label = f"HOLD - {variant.upper()}"
     
-    # Create all users
-    users = {name: User(name.lower(), INITIAL_USDC) for name, _ in LP_USERS}
     passive_name, passive_buy = PASSIVE_USER
-    users[passive_name] = User(passive_name.lower(), INITIAL_USDC)
+    passive = User(passive_name.lower(), 2 * K)
+    lpers = {name: User(name.lower(), 2 * K) for name, _ in LP_USERS}
     
-    if verbose:
-        print(f"\n{C.BOLD}{C.HEADER}{'='*70}{C.END}")
-        print(f"{C.BOLD}{C.HEADER}  {label} - {model_label(codename):^40}{C.END}")
-        print(f"{C.BOLD}{C.HEADER}{'='*70}{C.END}\n")
+    total_users = len(LP_USERS) + 1
+    
+    f.header(label, model_label(codename))
 
     # ┌───────────────────────────────────────────────────────────────────────┐
-    # │                    Variant: Passive BEFORE LPers                      │
+    # │                          Entry Phase                                   │
     # └───────────────────────────────────────────────────────────────────────┘
+    
+    f.section("Entry Phase")
+    
+    entry_num = 0
     
     if variant == "before":
-        # Passive buys first
-        u = users[passive_name]
-        lp.buy(u, passive_buy)
-        if verbose:
-            print(f"[{passive_name} Buy] {passive_buy} USDC -> {C.YELLOW}{u.balance_token:.2f}{C.END} tokens (NO LP)")
-        
-        # Compound before LPers enter
-        vault.compound(OFFSET_DAYS)
-        if verbose:
-            print(f"{C.DIM}  ... {OFFSET_DAYS} days pass ...{C.END}")
-        
-        # LPers enter and LP
-        for name, buy_amount in LP_USERS:
-            u = users[name]
-            lp.buy(u, buy_amount)
-            token_amount = u.balance_token
-            usdc_amount = token_amount * lp.price
-            lp.add_liquidity(u, token_amount, usdc_amount)
-            if verbose:
-                print(f"[{name}] Buy {buy_amount} + LP, Price: {C.GREEN}{lp.price:.6f}{C.END}")
+        # Passive holder enters first (no LP)
+        entry_num += 1
+        price_before = lp.price
+        lp.buy(passive, passive_buy)
+        price_after = lp.price
+        f.buy(entry_num, total_users, f"{passive_name} (NO LP)", passive_buy, 
+              price_before, passive.balance_token, price_after)
     
-    # ┌───────────────────────────────────────────────────────────────────────┐
-    # │                    Variant: Passive WITH LPers                        │
-    # └───────────────────────────────────────────────────────────────────────┘
+    # LPers enter
+    for name, buy_amount in LP_USERS:
+        entry_num += 1
+        u = lpers[name]
+        price_before = lp.price
+        lp.buy(u, buy_amount)
+        price_after = lp.price
+        tokens = u.balance_token
+        usdc = tokens * lp.price
+        lp.add_liquidity(u, tokens, usdc)
+        f.buy(entry_num, total_users, name, buy_amount, price_before, tokens, price_after)
     
-    elif variant == "with":
-        # All enter together - LPers first, then Passive
-        for name, buy_amount in LP_USERS:
-            u = users[name]
-            lp.buy(u, buy_amount)
-            token_amount = u.balance_token
-            usdc_amount = token_amount * lp.price
-            lp.add_liquidity(u, token_amount, usdc_amount)
-            if verbose:
-                print(f"[{name}] Buy {buy_amount} + LP, Price: {C.GREEN}{lp.price:.6f}{C.END}")
-        
-        u = users[passive_name]
-        lp.buy(u, passive_buy)
-        if verbose:
-            print(f"[{passive_name} Buy] {passive_buy} USDC -> {C.YELLOW}{u.balance_token:.2f}{C.END} tokens (NO LP)")
+    if variant == "with":
+        # Passive holder enters with LPers (no LP)
+        entry_num += 1
+        price_before = lp.price
+        lp.buy(passive, passive_buy)
+        price_after = lp.price
+        f.buy(entry_num, total_users, f"{passive_name} (NO LP)", passive_buy,
+              price_before, passive.balance_token, price_after)
     
-    # ┌───────────────────────────────────────────────────────────────────────┐
-    # │                    Variant: Passive AFTER LPers                       │
-    # └───────────────────────────────────────────────────────────────────────┘
+    if variant == "after":
+        # Passive holder enters after LPers (no LP)
+        entry_num += 1
+        price_before = lp.price
+        lp.buy(passive, passive_buy)
+        price_after = lp.price
+        f.buy(entry_num, total_users, f"{passive_name} (NO LP)", passive_buy,
+              price_before, passive.balance_token, price_after)
     
-    elif variant == "after":
-        # LPers enter and LP first
-        for name, buy_amount in LP_USERS:
-            u = users[name]
-            lp.buy(u, buy_amount)
-            token_amount = u.balance_token
-            usdc_amount = token_amount * lp.price
-            lp.add_liquidity(u, token_amount, usdc_amount)
-            if verbose:
-                print(f"[{name}] Buy {buy_amount} + LP, Price: {C.GREEN}{lp.price:.6f}{C.END}")
-        
-        # Compound before Passive enters
-        vault.compound(OFFSET_DAYS)
-        if verbose:
-            print(f"{C.DIM}  ... {OFFSET_DAYS} days pass ...{C.END}")
-        
-        # Passive buys at higher price
-        u = users[passive_name]
-        lp.buy(u, passive_buy)
-        if verbose:
-            print(f"[{passive_name} Buy] {passive_buy} USDC -> {C.YELLOW}{u.balance_token:.2f}{C.END} tokens (NO LP)")
-
-    if verbose:
-        lp.print_stats("After Entry Phase")
+    f.stats("After Entry", lp, level=1)
 
     # ┌───────────────────────────────────────────────────────────────────────┐
-    # │                         Compound Period                               │
+    # │                         Compound Period                                │
     # └───────────────────────────────────────────────────────────────────────┘
     
+    vault_before = vault.balance_of()
+    price_before_compound = lp.price
     vault.compound(COMPOUND_DAYS)
-    if verbose:
-        print(f"{C.BLUE}--- Compound {COMPOUND_DAYS} days ---{C.END}")
-        print(f"  Vault: {C.YELLOW}{vault.balance_of():.2f}{C.END}, Price: {C.GREEN}{lp.price:.6f}{C.END}")
+    f.compound(COMPOUND_DAYS, vault_before, vault.balance_of(), price_before_compound, lp.price)
 
     # ┌───────────────────────────────────────────────────────────────────────┐
-    # │                              Exit                                     │
+    # │                          Exit Phase                                    │
     # └───────────────────────────────────────────────────────────────────────┘
+    
+    f.section("Exit Phase")
     
     results: dict[str, D] = {}
+    exit_num = 0
     
-    # LPers exit: remove liquidity + sell
+    # LPers exit
     for name, buy_amount in LP_USERS:
-        u = users[name]
+        exit_num += 1
+        u = lpers[name]
+        initial = 2 * K
+        price_before = lp.price
+        
         lp.remove_liquidity(u)
-        tokens = u.balance_token
-        lp.sell(u, tokens)
-        profit = u.balance_usd - INITIAL_USDC
+        lp.sell(u, u.balance_token)
+        price_after = lp.price
+        
+        profit = u.balance_usd - initial
         results[name] = profit
-        if verbose:
-            pc = C.GREEN if profit > 0 else C.RED
-            print(f"  {name:8s}: Invested {C.YELLOW}{buy_amount}{C.END}, Profit: {pc}{profit:.2f}{C.END}")
+        roi = (profit / buy_amount) * 100
+        f.exit(exit_num, total_users, name, profit, price_before, price_after, roi=roi)
     
-    # Passive exits: just sell tokens (no LP to remove)
-    u = users[passive_name]
-    tokens = u.balance_token
-    lp.sell(u, tokens)
-    profit = u.balance_usd - INITIAL_USDC
+    # Passive holder exits (sell only, no LP to remove)
+    exit_num += 1
+    initial = 2 * K
+    price_before = lp.price
+    lp.sell(passive, passive.balance_token)
+    price_after = lp.price
+    
+    profit = passive.balance_usd - initial
     results[passive_name] = profit
-    if verbose:
-        pc = C.GREEN if profit > 0 else C.RED
-        print(f"  {passive_name:8s}: Invested {C.YELLOW}{passive_buy}{C.END}, Profit: {pc}{profit:.2f}{C.END} (NO LP)")
+    roi = (profit / passive_buy) * 100
+    f.exit(exit_num, total_users, f"{passive_name} (NO LP)", profit, 
+           price_before, price_after, roi=roi)
 
-    # ┌───────────────────────────────────────────────────────────────────────┐
-    # │                            Summary                                    │
-    # └───────────────────────────────────────────────────────────────────────┘
-    
-    if verbose:
-        total = sum(results.values())
-        losers = sum(1 for p in results.values() if p <= 0)
-        tc = C.GREEN if total > 0 else C.RED
-        print(f"\n{C.BOLD}Total profit: {tc}{total:.2f}{C.END}")
-        print(f"Vault remaining: {C.YELLOW}{vault.balance_of():.2f}{C.END}")
-        if results[passive_name] < 0:
-            print(f"{C.RED}⚠ Passive holder DILUTED by {-results[passive_name]:.2f} USDC{C.END}")
-        else:
-            print(f"{C.GREEN}✓ Passive holder profit: {results[passive_name]:.2f}{C.END}")
+    f.summary(results, vault.balance_of(), title=f"{label} SUMMARY")
 
     return {
         "codename": codename,
         "profits": results,
         "vault": vault.balance_of(),
         "losers": sum(1 for p in results.values() if p <= 0),
-        "winners": sum(1 for p in results.values() if p > 0),
-        "total_profit": sum(results.values(), D(0)),
     }
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
-# ║                         PUBLIC ENTRY POINTS                               ║
+# ║                         PUBLIC API                                        ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 
-def hold_before_scenario(codename: str, verbose: bool = True) -> ScenarioResult:
-    """Passive holder enters 90 days BEFORE LPers."""
-    return _hold_impl(codename, "before", verbose)
+def hold_scenario(codename: str, variant: HoldVariant, verbosity: int = 1) -> ScenarioResult:
+    """Run hold scenario with specified variant."""
+    return _hold_impl(codename, variant, verbosity)
 
-def hold_with_scenario(codename: str, verbose: bool = True) -> ScenarioResult:
-    """Passive holder enters WITH LPers (same day)."""
-    return _hold_impl(codename, "with", verbose)
 
-def hold_after_scenario(codename: str, verbose: bool = True) -> ScenarioResult:
-    """Passive holder enters 90 days AFTER LPers."""
-    return _hold_impl(codename, "after", verbose)
+def hold_before_scenario(codename: str, verbosity: int = 1, verbose: bool = True) -> ScenarioResult:
+    """Passive holder buys BEFORE LPers."""
+    v = verbosity if verbose else 0
+    return _hold_impl(codename, "before", v)
+
+
+def hold_with_scenario(codename: str, verbosity: int = 1, verbose: bool = True) -> ScenarioResult:
+    """Passive holder buys WITH LPers."""
+    v = verbosity if verbose else 0
+    return _hold_impl(codename, "with", v)
+
+
+def hold_after_scenario(codename: str, verbosity: int = 1, verbose: bool = True) -> ScenarioResult:
+    """Passive holder buys AFTER LPers."""
+    v = verbosity if verbose else 0
+    return _hold_impl(codename, "after", v)

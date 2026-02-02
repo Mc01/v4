@@ -2,15 +2,13 @@
 ╔═══════════════════════════════════════════════════════════════════════════╗
 ║                      Late Entrant Scenario                                ║
 ╠═══════════════════════════════════════════════════════════════════════════╣
-║  Tests first-mover advantage vs late entry.                               ║
-║                                                                           ║
-║  Early users enter at day 0, LP, and compound. A late user enters after   ║
-║  price has appreciated (due to Y→P), buys at higher price, LPs, then all  ║
-║  exit. Configurable wait periods: 90 or 180 days.                         ║
+║  Tests first-mover advantage: early users enter, compound, then late      ║
+║  entrant joins at a higher price.                                         ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 """
 from decimal import Decimal as D
-from ..core import create_model, model_label, User, Color, ScenarioResult
+from ..core import create_model, model_label, User, K, ScenarioResult
+from ..formatter import Formatter, fmt
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -19,123 +17,127 @@ from ..core import create_model, model_label, User, Color, ScenarioResult
 
 EARLY_USERS: list[tuple[str, D]] = [
     ("Alice", D(500)),
-    ("Bob", D(400)),
-    ("Carl", D(300)),
+    ("Bob", D(500)),
+    ("Carl", D(500)),
 ]
 
-LATE_USER = ("Luna", D(500))
-FINAL_COMPOUND = 90
-INITIAL_USDC = D(2_000)
+LATE_USER = ("Diana", D(500))
+COMPOUND_AFTER_LATE = 100
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
-# ║                       CORE IMPLEMENTATION                                 ║
+# ║                       SHARED IMPLEMENTATION                               ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 
-def _late_impl(codename: str, wait_days: int, verbose: bool = True) -> ScenarioResult:
+def _late_impl(codename: str, wait_days: int, verbosity: int = 1) -> ScenarioResult:
     """Run late entrant scenario with specified wait period."""
     vault, lp = create_model(codename)
-    C = Color
-    label = f"LATE ENTRANT ({wait_days}d wait)"
+    f = Formatter(verbosity)
+    f.set_lp(lp)
     
-    users = {name: User(name.lower(), INITIAL_USDC) for name, _ in EARLY_USERS}
     late_name, late_buy = LATE_USER
-    users[late_name] = User(late_name.lower(), INITIAL_USDC)
+    users = {name: User(name.lower(), 2 * K) for name, _ in EARLY_USERS}
+    users[late_name] = User(late_name.lower(), 2 * K)
     
+    total_users = len(EARLY_USERS) + 1
     entry_prices: dict[str, D] = {}
     
-    if verbose:
-        print(f"\n{C.BOLD}{C.HEADER}{'='*70}{C.END}")
-        print(f"{C.BOLD}{C.HEADER}  {label} - {model_label(codename):^40}{C.END}")
-        print(f"{C.BOLD}{C.HEADER}{'='*70}{C.END}\n")
+    f.header(f"LATE ENTRANT ({wait_days}d)", model_label(codename))
 
     # ┌───────────────────────────────────────────────────────────────────────┐
-    # │                    Early Users Enter (Day 0)                          │
+    # │                    Early Users Enter                                   │
     # └───────────────────────────────────────────────────────────────────────┘
     
-    for name, buy_amount in EARLY_USERS:
+    f.section("Early Entry Phase")
+    
+    for i, (name, buy_amount) in enumerate(EARLY_USERS, 1):
         u = users[name]
         entry_prices[name] = lp.price
+        price_before = lp.price
+        
         lp.buy(u, buy_amount)
-        token_amount = u.balance_token
-        usdc_amount = token_amount * lp.price
-        lp.add_liquidity(u, token_amount, usdc_amount)
-        if verbose:
-            print(f"[{name}] Buy {buy_amount} @ {C.GREEN}{entry_prices[name]:.6f}{C.END} + LP")
+        price_after = lp.price
+        tokens = u.balance_token
+        usdc = tokens * lp.price
+        lp.add_liquidity(u, tokens, usdc)
+        
+        f.buy(i, total_users, name, buy_amount, price_before, tokens, price_after)
     
-    if verbose:
-        lp.print_stats("After Early Users")
+    f.stats("After Early Entry", lp, level=1)
 
     # ┌───────────────────────────────────────────────────────────────────────┐
-    # │                  Wait Period (Price Appreciates)                      │
+    # │                Wait Period Before Late Entry                           │
     # └───────────────────────────────────────────────────────────────────────┘
     
+    vault_before = vault.balance_of()
+    price_before = lp.price
     vault.compound(wait_days)
-    if verbose:
-        print(f"{C.BLUE}--- Wait {wait_days} days (Y→P compounds) ---{C.END}")
-        print(f"  Vault: {C.YELLOW}{vault.balance_of():.2f}{C.END}, Price: {C.GREEN}{lp.price:.6f}{C.END}")
+    f.compound(wait_days, vault_before, vault.balance_of(), price_before, lp.price)
 
     # ┌───────────────────────────────────────────────────────────────────────┐
-    # │                    Late User Enters (Day N)                           │
+    # │                    Late User Enters                                    │
     # └───────────────────────────────────────────────────────────────────────┘
+    
+    f.section("Late Entry")
     
     u = users[late_name]
     entry_prices[late_name] = lp.price
+    price_before = lp.price
+    
     lp.buy(u, late_buy)
-    token_amount = u.balance_token
-    usdc_amount = token_amount * lp.price
-    lp.add_liquidity(u, token_amount, usdc_amount)
-    if verbose:
-        price_increase = ((entry_prices[late_name] / entry_prices["Alice"]) - 1) * 100
-        print(f"[{late_name}] Buy {late_buy} @ {C.YELLOW}{entry_prices[late_name]:.6f}{C.END} (+{price_increase:.1f}% vs early) + LP")
-        lp.print_stats("After Late Entry")
+    price_after = lp.price
+    tokens = u.balance_token
+    usdc = tokens * lp.price
+    lp.add_liquidity(u, tokens, usdc)
+    
+    # Calculate price increase vs first early user
+    alice_entry = entry_prices["Alice"]
+    if alice_entry > 0:
+        price_increase = ((entry_prices[late_name] / alice_entry) - 1) * 100
+        increase_str = f"+{price_increase:.1f}% vs early"
+    else:
+        increase_str = "early price was 0"
+
+    f.buy(total_users, total_users, late_name, late_buy, price_before, tokens, price_after, emoji="⏰")
+    f.info(f"  Late entry price: {fmt(entry_prices[late_name], 4)} ({increase_str})")
+    f.stats("After Late Entry", lp, level=1)
 
     # ┌───────────────────────────────────────────────────────────────────────┐
-    # │                    Final Compound Period                              │
+    # │               Compound After Late Entry                                │
     # └───────────────────────────────────────────────────────────────────────┘
     
-    vault.compound(FINAL_COMPOUND)
-    if verbose:
-        print(f"{C.BLUE}--- Final compound {FINAL_COMPOUND} days ---{C.END}")
-        print(f"  Vault: {C.YELLOW}{vault.balance_of():.2f}{C.END}, Price: {C.GREEN}{lp.price:.6f}{C.END}")
+    vault_before = vault.balance_of()
+    price_before = lp.price
+    vault.compound(COMPOUND_AFTER_LATE)
+    f.compound(COMPOUND_AFTER_LATE, vault_before, vault.balance_of(), price_before, lp.price)
 
     # ┌───────────────────────────────────────────────────────────────────────┐
-    # │                        Exit (FIFO Order)                              │
+    # │                       Exit Phase                                       │
     # └───────────────────────────────────────────────────────────────────────┘
+    
+    f.section("Exit Phase")
     
     results: dict[str, D] = {}
     all_users = list(EARLY_USERS) + [LATE_USER]
     
-    for name, buy_amount in all_users:
+    for i, (name, buy_amount) in enumerate(all_users, 1):
         u = users[name]
+        initial = 2 * K
+        price_before = lp.price
+        
         lp.remove_liquidity(u)
-        tokens = u.balance_token
-        lp.sell(u, tokens)
-        profit = u.balance_usd - INITIAL_USDC
+        lp.sell(u, u.balance_token)
+        price_after = lp.price
+        
+        profit = u.balance_usd - initial
         results[name] = profit
         roi = (profit / buy_amount) * 100
-        if verbose:
-            pc = C.GREEN if profit > 0 else C.RED
-            entry_label = "LATE" if name == late_name else "early"
-            print(f"  {name:6s} ({entry_label}): Entry @ {entry_prices[name]:.4f}, Profit: {pc}{profit:.2f}{C.END} ({roi:+.1f}%)")
-
-    # ┌───────────────────────────────────────────────────────────────────────┐
-    # │                            Summary                                    │
-    # └───────────────────────────────────────────────────────────────────────┘
-    
-    if verbose:
-        # Compare ROI
-        early_avg_roi = sum((results[n] / b) * 100 for n, b in EARLY_USERS) / len(EARLY_USERS)
-        late_roi = (results[late_name] / late_buy) * 100
         
-        print(f"\n{C.BOLD}Early users avg ROI: {C.GREEN}{early_avg_roi:.1f}%{C.END}")
-        print(f"{C.BOLD}Late user ROI: ", end="")
-        if late_roi >= early_avg_roi:
-            print(f"{C.GREEN}{late_roi:.1f}%{C.END} (≥ early avg)")
-        else:
-            diff = early_avg_roi - late_roi
-            print(f"{C.YELLOW}{late_roi:.1f}%{C.END} (< early avg by {diff:.1f}pp)")
-        print(f"Vault remaining: {C.YELLOW}{vault.balance_of():.2f}{C.END}")
+        is_late = name == late_name
+        f.exit(i, total_users, name, profit, price_before, price_after, 
+               emoji="⏰" if is_late else "", roi=roi)
+
+    f.summary(results, vault.balance_of(), title=f"LATE ENTRANT ({wait_days}d) SUMMARY")
 
     return {
         "codename": codename,
@@ -143,19 +145,20 @@ def _late_impl(codename: str, wait_days: int, verbose: bool = True) -> ScenarioR
         "vault": vault.balance_of(),
         "entry_prices": entry_prices,
         "losers": sum(1 for p in results.values() if p <= 0),
-        "winners": sum(1 for p in results.values() if p > 0),
-        "total_profit": sum(results.values(), D(0)),
     }
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
-# ║                         PUBLIC ENTRY POINTS                               ║
+# ║                         PUBLIC API                                        ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 
-def late_90_scenario(codename: str, verbose: bool = True) -> ScenarioResult:
-    """Late entrant joins 90 days after early users."""
-    return _late_impl(codename, 90, verbose)
+def late_90_scenario(codename: str, verbosity: int = 1, verbose: bool = True) -> ScenarioResult:
+    """Late entrant after 90 days of compounding."""
+    v = verbosity if verbose else 0
+    return _late_impl(codename, 90, v)
 
-def late_180_scenario(codename: str, verbose: bool = True) -> ScenarioResult:
-    """Late entrant joins 180 days after early users."""
-    return _late_impl(codename, 180, verbose)
+
+def late_180_scenario(codename: str, verbosity: int = 1, verbose: bool = True) -> ScenarioResult:
+    """Late entrant after 180 days of compounding."""
+    v = verbosity if verbose else 0
+    return _late_impl(codename, 180, v)

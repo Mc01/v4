@@ -20,6 +20,9 @@ EXPOSURE_FACTOR = 100 * K
 CAP = 1 * B                # Maximum token supply
 VIRTUAL_LIMIT = 100 * K    # Threshold where virtual liquidity tapers to zero
 
+# Dust threshold: residuals below this from accumulated rounding are treated as zero
+DUST = D("1E-12")
+
 # Vault yield
 VAULT_APY = D(5) / D(100)
 
@@ -91,6 +94,7 @@ ACTIVE_MODELS: List[str] = [code for code, cfg in MODELS.items() if not cfg["dep
 
 class Color:
     HEADER = '\033[95m'
+    PURPLE = '\033[35m'
     BLUE = '\033[94m'
     CYAN = '\033[96m'
     GREEN = '\033[92m'
@@ -531,6 +535,11 @@ class LP:
             if self.user_buy_usdc[user.name] <= D(0):
                 del self.user_buy_usdc[user.name]
 
+        # Clear dust from accumulated rounding when supply is effectively zero
+        if self.minted < DUST:
+            self.minted = D(0)
+            self.buy_usdc = D(0)
+
         self.dehypo(out_amount)
         self.balance_usd -= out_amount
         user.balance_usd += out_amount
@@ -598,12 +607,10 @@ class LP:
         self.mint(token_yield)
         self.dehypo(total_usdc)
         
-        # Update aggregate USDC tracking
-        lp_usdc_reduction = usd_deposit + min(lp_usdc_yield_withdrawn, max(D(0), self.lp_usdc - usd_deposit))
-        self.lp_usdc -= lp_usdc_reduction
-        
-        if buy_usdc_yield_withdrawn > 0:
-            self.buy_usdc -= min(buy_usdc_yield_withdrawn, self.buy_usdc)
+        # Update aggregate USDC tracking (principal only, never yield)
+        self.lp_usdc -= usd_deposit
+        if self.lp_usdc < DUST:
+            self.lp_usdc = D(0)
 
         # Transfer to user
         self.balance_token -= token_amount

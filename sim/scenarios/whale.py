@@ -12,7 +12,8 @@
 ╚═══════════════════════════════════════════════════════════════════════════╝
 """
 from decimal import Decimal as D
-from ..core import create_model, model_label, User, Color, ScenarioResult
+from ..core import create_model, model_label, User, ScenarioResult
+from ..formatter import Formatter, V, fmt
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -37,10 +38,11 @@ WHALE_INITIAL = D(100_000)
 # ║                       CORE IMPLEMENTATION                                 ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 
-def whale_scenario(codename: str, verbose: bool = True) -> ScenarioResult:
+def whale_scenario(codename: str, verbosity: int = 1) -> ScenarioResult:
     """Run whale entry scenario."""
     vault, lp = create_model(codename)
-    C = Color
+    f = Formatter(verbosity)
+    f.set_lp(lp)
     
     users = {name: User(name.lower(), REGULAR_INITIAL) for name, _ in REGULAR_USERS}
     whale_name, whale_buy = WHALE
@@ -48,32 +50,34 @@ def whale_scenario(codename: str, verbose: bool = True) -> ScenarioResult:
     
     entry_prices: dict[str, D] = {}
     tokens_received: dict[str, D] = {}
+    total_users = len(REGULAR_USERS) + 1  # +1 for whale
     
-    if verbose:
-        print(f"\n{C.BOLD}{C.HEADER}{'='*70}{C.END}")
-        print(f"{C.BOLD}{C.HEADER}  WHALE ENTRY - {model_label(codename):^48}{C.END}")
-        print(f"{C.BOLD}{C.HEADER}{'='*70}{C.END}\n")
+    # Header
+    f.header("WHALE ENTRY", model_label(codename))
 
     # ┌───────────────────────────────────────────────────────────────────────┐
     # │                    Regular Users Enter First                          │
     # └───────────────────────────────────────────────────────────────────────┘
     
-    for name, buy_amount in REGULAR_USERS:
+    f.section("Entry Phase")
+    
+    for i, (name, buy_amount) in enumerate(REGULAR_USERS, 1):
         u = users[name]
         entry_prices[name] = lp.price
+        price_before = lp.price
+        
         lp.buy(u, buy_amount)
         tokens_received[name] = u.balance_token
+        price_after_buy = lp.price
         
         token_amount = u.balance_token
         usdc_amount = token_amount * lp.price
         lp.add_liquidity(u, token_amount, usdc_amount)
         
-        if verbose:
-            print(f"[{name}] Buy {buy_amount} @ {entry_prices[name]:.4f} -> {tokens_received[name]:.2f} tokens + LP")
+        f.buy(i, total_users, name, buy_amount, price_before, tokens_received[name], price_after_buy)
+        f.add_lp(name, token_amount, usdc_amount)
     
-    if verbose:
-        print(f"\n{C.YELLOW}Total regular USDC in: {D(500) * 5}{C.END}")
-        lp.print_stats("Before Whale")
+    f.stats("Before Whale", lp, level=1)
 
     # ┌───────────────────────────────────────────────────────────────────────┐
     # │                        Whale Enters                                   │
@@ -91,68 +95,74 @@ def whale_scenario(codename: str, verbose: bool = True) -> ScenarioResult:
     usdc_amount = token_amount * lp.price
     lp.add_liquidity(u, token_amount, usdc_amount)
     
-    if verbose:
-        slippage = ((price_after_whale_buy / price_before_whale) - 1) * 100
-        effective_price = whale_buy / tokens_received[whale_name]
-        print(f"\n{C.BOLD}[{whale_name}] WHALE BUY {whale_buy} USDC{C.END}")
-        print(f"  Entry price: {C.GREEN}{entry_prices[whale_name]:.4f}{C.END}")
-        print(f"  Tokens received: {C.YELLOW}{tokens_received[whale_name]:.2f}{C.END}")
-        print(f"  Effective avg price: {C.YELLOW}{effective_price:.4f}{C.END}")
-        print(f"  Price impact: {C.RED}+{slippage:.1f}%{C.END}")
-        lp.print_stats("After Whale")
+    f.buy(total_users, total_users, whale_name, whale_buy, 
+          price_before_whale, tokens_received[whale_name], price_after_whale_buy, emoji="🐋")
+    f.add_lp(whale_name, token_amount, usdc_amount, emoji="🐋")
+    
+    f.stats("After Whale", lp, level=1)
 
     # ┌───────────────────────────────────────────────────────────────────────┐
     # │                         Compound Period                               │
     # └───────────────────────────────────────────────────────────────────────┘
     
+    vault_before = vault.balance_of()
+    price_before_compound = lp.price
     vault.compound(COMPOUND_DAYS)
-    if verbose:
-        print(f"{C.BLUE}--- Compound {COMPOUND_DAYS} days ---{C.END}")
-        print(f"  Vault: {C.YELLOW}{vault.balance_of():.2f}{C.END}, Price: {C.GREEN}{lp.price:.6f}{C.END}")
+    f.compound(COMPOUND_DAYS, vault_before, vault.balance_of(), price_before_compound, lp.price)
 
     # ┌───────────────────────────────────────────────────────────────────────┐
     # │                  Exit: Regular Users First, Whale Last                │
     # └───────────────────────────────────────────────────────────────────────┘
     
+    f.section("Exit Phase")
+    
     results: dict[str, D] = {}
     
     # Regular users exit
-    for name, buy_amount in REGULAR_USERS:
+    for i, (name, buy_amount) in enumerate(REGULAR_USERS, 1):
         u = users[name]
+        price_before_exit = lp.price
+
+        usdc_before_lp = u.balance_usd
         lp.remove_liquidity(u)
         tokens = u.balance_token
+        usdc_from_lp = u.balance_usd - usdc_before_lp
+
         lp.sell(u, tokens)
+        price_after_exit = lp.price
+
         profit = u.balance_usd - REGULAR_INITIAL
         results[name] = profit
         roi = (profit / buy_amount) * 100
-        if verbose:
-            pc = C.GREEN if profit > 0 else C.RED
-            print(f"  {name:6s}: Profit: {pc}{profit:8.2f}{C.END} ({roi:+.1f}%)")
+
+        f.remove_lp(name, tokens, usdc_from_lp)
+        f.exit(i, total_users, name, profit, price_before_exit, price_after_exit, roi=roi)
     
     # Whale exits last
     u = users[whale_name]
+    price_before_exit = lp.price
+
+    usdc_before_lp = u.balance_usd
     lp.remove_liquidity(u)
     tokens = u.balance_token
+    usdc_from_lp = u.balance_usd - usdc_before_lp
+
     lp.sell(u, tokens)
+    price_after_exit = lp.price
+
     profit = u.balance_usd - WHALE_INITIAL
     results[whale_name] = profit
     roi = (profit / whale_buy) * 100
-    if verbose:
-        pc = C.GREEN if profit > 0 else C.RED
-        print(f"\n  {C.BOLD}{whale_name:6s}: Profit: {pc}{profit:8.2f}{C.END} ({roi:+.1f}%)")
+
+    f.remove_lp(whale_name, tokens, usdc_from_lp, emoji="🐋")
+    f.exit(total_users, total_users, whale_name, profit, 
+           price_before_exit, price_after_exit, emoji="🐋", roi=roi)
 
     # ┌───────────────────────────────────────────────────────────────────────┐
     # │                            Summary                                    │
     # └───────────────────────────────────────────────────────────────────────┘
     
-    if verbose:
-        regular_total = sum(results[n] for n, _ in REGULAR_USERS)
-        whale_profit = results[whale_name]
-        
-        print(f"\n{C.BOLD}Summary:{C.END}")
-        print(f"  Regular users total profit: {C.GREEN if regular_total > 0 else C.RED}{regular_total:.2f}{C.END}")
-        print(f"  Whale profit: {C.GREEN if whale_profit > 0 else C.RED}{whale_profit:.2f}{C.END}")
-        print(f"  Vault remaining: {C.YELLOW}{vault.balance_of():.2f}{C.END}")
+    f.summary(results, vault.balance_of(), title="WHALE SCENARIO SUMMARY")
 
     return {
         "codename": codename,
