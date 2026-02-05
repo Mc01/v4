@@ -1,99 +1,51 @@
-# V4 - Yield-Bearing LP Token Protocol
+# Commonwealth Protocol — Agent Orientation
 
-## Project Context
+Commonwealth is a yield-bearing LP token protocol. Users buy tokens with USDC, provide liquidity, and earn yield from vault rehypothecation (5% APY). All vault yield is shared proportionally among liquidity providers — including yield from non-LPing users' USDC. This "common yield" is the core value proposition. We are validating the math in Python before writing Solidity.
 
-This project is a mathematical model testing ground for a token protocol where the token itself is a **common good** of all participants. Every user who enters the protocol is incentivized to provide liquidity, and in return earns yield generated through **rehypothecation of capital** and **mutual distribution among liquidity providers**.
+**Start here, then read [CONTEXT.md](./CONTEXT.md) for operational details.**
 
-Core loop:
-1. User buys tokens with USDC
-2. User provides liquidity (tokens + USDC)
-3. All USDC is rehypothecated into yield vaults (e.g. Spark/Sky, 5% APY)
-4. Yield is distributed back to liquidity providers proportionally
-5. User can remove liquidity and sell tokens at any time
+---
 
-## Key Terminology
+## Reading Order
 
-- **Bonding Curve** - pricing mechanism (e.g. constant product x*y=k) that determines token price based on supply and demand
-- **Vault** - external yield-generating protocol (e.g. Spark/Sky) where USDC is deposited to earn yield
-- **Rehypothecation** - taking USDC deposited by users and deploying it into vaults to generate yield on their behalf
-- **Liquidity Provider (LP)** - user who deposits both tokens and USDC into the protocol to earn yield
-- **Minting** - creating new tokens when a user buys or when inflation rewards are distributed
-- **Burning** - destroying tokens when a user sells back to the protocol
-- **Token Inflation** - minting additional tokens as yield reward for LPs (e.g. 5% APY)
-- **Compounding** - vault yield accruing over time, increasing the USDC backing per token
-- **Slippage** - price difference between expected and actual execution price due to bonding curve mechanics
-- **Price** - USDC value per token, derived from protocol reserves and token supply
+| # | File | When to read | What you learn |
+|---|------|-------------|----------------|
+| 1 | **[CONTEXT.md](./CONTEXT.md)** | Always | How to run, code locations, current problems, file map |
+| 2 | **[MISSION.md](./MISSION.md)** | For design decisions | Value proposition, yield design, why buy_usdc_yield to LPs is intentional |
+| 3 | **[math/FINDINGS.md](./math/FINDINGS.md)** | For analysis context | Root causes of vault residuals, mathematical proofs, known issues |
+| 4 | **[math/PLAN.md](./math/PLAN.md)** | For implementation work | Exact code changes, execution order, success criteria |
+| 5 | **[math/VALUES.md](./math/VALUES.md)** | For reference data | Manual calculations, scenario traces, actual vs expected numbers |
+| 6 | **[../sim/MATH.md](../sim/MATH.md)** | For protocol math | All formulas, curve integrals, price multiplier mechanism |
+| 7 | **[../sim/MODELS.md](../sim/MODELS.md)** | For model matrix | Codename convention, archived models, tradeoffs |
+| 8 | **[../sim/TEST.md](../sim/TEST.md)** | For test env specifics | Virtual reserves, exposure factor, test-only mechanics |
 
-## Model Building Blocks
+---
 
-Each model is defined by its **bonding curve type**:
+## Glossary
 
-- **Constant Product** (CYN) — standard AMM (x*y=k)
-- **Exponential** (EYN) — price grows exponentially with supply
-- **Sigmoid** (SYN) — S-curve with slow start, rapid growth, plateau
-- **Logarithmic** (LYN) — diminishing growth
+| Term | Definition |
+|------|-----------|
+| **Commonwealth** | Internal name for this protocol |
+| **Bonding Curve** | Pricing function: determines token price from supply/reserves |
+| **Vault** | External yield protocol (Spark/Sky/Aave) where all USDC earns 5% APY |
+| **Rehypothecation** | Deploying user-deposited USDC into yield vaults |
+| **LP** | Liquidity Provider — deposits tokens + USDC pair to earn yield |
+| **Minting/Burning** | Creating/destroying tokens on buy/sell |
+| **Token Inflation** | Minting new tokens for LPs at configurable APY |
+| **Common Yield** | All vault yield shared among LPs — the core value proposition |
+| **buy_usdc** | Aggregate USDC from token purchases (feeds into price) |
+| **lp_usdc** | Aggregate USDC from LP deposits (does NOT feed into price in active models) |
+| **effective_usdc** | `buy_usdc * (vault_balance / total_principal)` — yield-adjusted pricing input |
+| **Price Multiplier** | `effective_usdc / buy_usdc` — how yield scales integral curve prices |
+| **Fair Share Cap** | Limits withdrawals to proportional vault share (prevents bank runs) |
+| **CYN/EYN/SYN/LYN** | Active models: [C]onstant/[E]xp/[S]igmoid/[L]og + [Y]ield->Price + [N]o LP->Price |
 
-## Ideal Model
-
-Fixed invariants across all models:
-- **Token Inflation**: always yes (LPs earn minted tokens proportional to yield)
-- **Buy/Sell Impacts Price**: always yes (core price discovery mechanism)
-- **Yield → Price**: always yes (vault compounding feeds into price curve)
-- **LP → Price**: always no (adding/removing liquidity is price-neutral)
-
-Active models (differ only by curve type):
-
-| Codename | Curve Type |
-|----------|-----------|
-| **CYN** | Constant Product |
-| **EYN** | Exponential |
-| **SYN** | Sigmoid |
-| **LYN** | Logarithmic |
-
-Archived models (*YY, *NY, *NN) remain available for backwards compatibility but are not recommended.
+---
 
 ## Working Rules
 
-The protocol is internally referred to as **"commonwealth"**.
-
-1. **This is a testfield.** The purpose is to validate math and choose the correct model before writing real Solidity contracts. Get the math right here first.
-
-2. **Keep it simple.** Use simplified abstractions for Vault, Liquidity Pool, Compounding, etc. Complexity in the model should come from the economic mechanics, not from implementation scaffolding.
-
-3. **Track what matters.** Every model must report:
-   - Total yield generated by the vault
-   - Yield earned by the protocol (commonwealth's take)
-   - Yield earned by each individual user
-   - Profit/loss per user at exit
-
-4. **Dual goal: attractive to users AND sustainable for the protocol.** The commonwealth must generate returns while remaining an opportunity for everyone. The best model is one where the fewest users lose money.
-
-5. **Commonwealth is a common good.** The token and protocol exist to serve all participants. Models that structurally disadvantage late entrants or create extractive dynamics should be identified and avoided.
-
-## Protocol Fee
-
-- All USDC is deposited into Sky Vault generating 5% APY yearly
-- The commonwealth may take a percentage of generated yield as its cut
-- For initial model exploration: **protocol fee = 0%** (to isolate model mechanics)
-- Protocol fee will be introduced once the best model is identified
-
-## Yield Sources & Entitlement
-
-Three sources of yield for a liquidity provider:
-
-1. **Buy USDC yield** - yield on USDC spent to buy tokens (deposited in vault)
-2. **LP USDC yield** - yield on USDC provided as liquidity (deposited in vault)
-3. **Token inflation** - new tokens minted at 5% APY on tokens provided as liquidity
-
-**Only paired liquidity (token + USDC) entitles the provider to yield appreciation.** Users may buy tokens without providing liquidity, or hold tokens without pairing - but they do not earn yield in those cases.
-
-### User Journey
-
-1. User pays USDC → receives tokens (USDC goes to vault, starts earning)
-2. User adds tokens + USDC as liquidity pair
-3. User is now exposed to yield from:
-   - USDC used to buy tokens
-   - USDC provided as liquidity
-   - Tokens provided as liquidity (inflation)
-4. User removes liquidity → receives tokens with accrued yield + USDC with accrued yield (from buy USDC & lp USDC)
-5. User sells tokens → receives USDC
+1. **This is a testbed.** Validate math first. Get the math right before Solidity.
+2. **Keep it simple.** Complexity should come from economic mechanics, not scaffolding.
+3. **Track what matters.** Every model reports: total yield, yield per user, profit/loss per user, vault residual.
+4. **Dual goal.** Attractive to users (everyone earns) AND sustainable for the protocol.
+5. **Common good.** Models that structurally disadvantage late entrants must be identified and avoided.

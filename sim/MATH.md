@@ -4,8 +4,8 @@
 
 This document describes the mathematical mechanics of the commonwealth protocol. The core operations — buy, add liquidity, compound, remove liquidity, sell — work with any bonding curve, using `price(supply)` as a pluggable function.
 
-For curve-specific formulas and behavior, see [CURVES.md](./CURVES.md).
 For the model matrix and fixed invariants, see [MODELS.md](./MODELS.md).
+For test environment specifics (virtual reserves, exposure factor), see [TEST.md](./TEST.md).
 
 ---
 
@@ -52,10 +52,10 @@ All USDC in vault earns 5% APY, compounded daily.
 
 ```
 vault_balance = principal * (1 + apy/365) ^ days
-compound_index = vault_balance / total_principal
+compound_ratio = vault_balance / total_principal
 ```
 
-Where `total_principal = buy_usdc + lp_usdc`. The `compound_index` grows over time, which increases `buy_usdc_with_yield` and pushes price up.
+Where `total_principal = buy_usdc + lp_usdc`. The `compound_ratio` grows over time, which increases `buy_usdc_with_yield` and pushes price up.
 
 ### 4. Remove Liquidity
 
@@ -136,9 +136,30 @@ price = curve_price(supply, buy_usdc_with_yield)
 
 ---
 
-## Curve-Specific Formulas
+## Price Multiplier Mechanism (Integral Curves)
 
-Each curve defines `price(supply)` and the integral used to compute buy cost / sell return over a range of supply. See [CURVES.md](./CURVES.md) for full details.
+For integral curves (EYN, SYN, LYN), the bonding curve operates on a "base" price function. When yield impacts price, the actual USDC amounts are scaled by a **price multiplier**:
+
+```
+effective_usdc = buy_usdc * (vault_balance / total_principal)   # yield-adjusted
+price_multiplier = effective_usdc / buy_usdc                    # = compound_ratio
+```
+
+This multiplier scales buy costs and sell returns:
+
+```
+Buy:  effective_cost = usdc_amount / multiplier
+      tokens = bisect(supply, effective_cost, integral_fn)
+
+Sell: base_return = integral(supply_after, supply_before)
+      usdc_out = base_return * multiplier
+```
+
+**Why this matters**: The multiplier changes between buy and sell as buy_usdc and vault balance shift. For nonlinear curves, `integral(a,b)/m1 * m2 != cost * (m2/m1)`. SYN avoids this because its integral is linear at saturation. EYN amplifies it exponentially. See [../.claude/math/FINDINGS.md](../.claude/math/FINDINGS.md) Root Cause #2.
+
+---
+
+## Curve-Specific Formulas
 
 ### Constant Product (x * y = k)
 
@@ -349,7 +370,7 @@ This proportional allocation applies regardless of curve type.
 
 ```
 VAULT_APY = 5%          # Annual percentage yield, compounded daily
-TOKEN_INFLATION = 5%    # Annual token minting rate for LPs, compounded daily
+TOKEN_INFLATION = 5%    # Annual token minting rate for LPs, compounded daily (currently tied to VAULT_APY; see FIX 3 in .claude/math/PLAN.md to decouple)
 ```
 
 Curve-specific constants (vary per implementation):

@@ -20,6 +20,8 @@ k = token_reserve * usdc_reserve
 - `usdc_reserve` combines real USDC (from buys) with virtual liquidity (bootstrap)
 - `k` is the constant product invariant, recomputed from these reserves
 
+> **Known issue:** `_update_k()` is also called in `add_liquidity()` and `remove_liquidity()`, which inflates k during LP operations. For YN models (LP → Price = No), this is a bug — LP operations should not change reserves or k. This causes ~20k USDC vault residual in CYN. See [../.claude/math/FINDINGS.md](../.claude/math/FINDINGS.md) Root Cause #1 and [../.claude/math/PLAN.md](../.claude/math/PLAN.md) FIX 1.
+
 Without virtual reserves, the curve would start with zero on one side and no trades could execute.
 
 ---
@@ -53,11 +55,8 @@ virtual_liquidity = base * (1 - min(buy_usdc, VIRTUAL_LIMIT) / VIRTUAL_LIMIT)
 - At 100K USDC deposited: `virtual_liquidity` approaches 0
 - Smoothly transitions from bootstrapped to fully organic reserves
 
-**Floor constraint** ensures `usdc_reserve >= token_reserve`:
-```python
-floor = token_reserve - buy_usdc
-virtual_liquidity = max(virtual_liquidity, floor, 0)
-```
+~~**Floor constraint** (removed):~~
+The original floor constraint (`floor = token_reserve - buy_usdc`) was removed from `core.py` because it could go negative and cause accounting drift. Virtual liquidity now decays smoothly to zero based only on `buy_usdc`, with a simple `max(0, ...)` guard.
 
 ---
 

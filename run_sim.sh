@@ -10,4 +10,4 @@
 #   ./run_sim.sh --rbank         # Reverse bank run (LIFO)
 #   ./run_sim.sh --help          # Show all options
 
-python3 -m sim.test_model "$@"
+python3 -m sim.run_model "$@"

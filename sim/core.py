@@ -1,7 +1,7 @@
 """
 Commonwealth Protocol - Core Infrastructure
 
-Contains all core classes, constants, and utilities used by test_model.py and scenarios.
+Contains all core classes, constants, and utilities used by run_model.py and scenarios.
 """
 from decimal import Decimal as D
 from typing import Callable, Dict, List, Optional, Tuple, TypedDict
@@ -39,6 +39,19 @@ SIG_MIDPOINT = D(0)
 
 LOG_BASE_PRICE = D(1)
 LOG_K = D("0.01")           # 500 USDC -> ~510 tokens
+
+# ┌───────────────────────────────────────────────────────────────────────────┐
+# │ Testing & Debugging Configuration                                         │
+# └───────────────────────────────────────────────────────────────────────────┘
+
+# Strict mode: enable accounting assertions (performance overhead)
+STRICT_MODE = False
+
+# Disable virtual liquidity for isolation testing
+DISABLE_VIRTUAL_LIQUIDITY = False
+
+# Binary search precision for integral curves
+BISECT_ITERATIONS = 200  # Increased from 100 for better precision
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -265,13 +278,16 @@ def _bisect_tokens_for_cost(supply: D, cost: D, integral_fn: Callable[[D, D], D]
     lo, hi = D(0), min(max_tokens, D("1e8"))
     while integral_fn(supply, supply + hi) < cost and hi < max_tokens:
         hi *= 2
-    for _ in range(100):
+    for _ in range(BISECT_ITERATIONS):
         mid = (lo + hi) / 2
         mid_cost = integral_fn(supply, supply + mid)
         if mid_cost < cost:
             lo = mid
         else:
             hi = mid
+        # Early exit if converged to desired precision
+        if abs(mid_cost - cost) < DUST:
+            break
     return (lo + hi) / 2
 
 
@@ -305,7 +321,10 @@ class LP:
         self.user_buy_usdc: Dict[str, D] = {}
         self.user_snapshot: Dict[str, UserSnapshot] = {}
 
-        # Aggregate USDC from buys vs LP deposits (split matters for pricing)
+        # Aggregate USDC tracking — the split is the core of model dimensions:
+        # - buy_usdc: always contributes to effective_usdc (price base)
+        # - lp_usdc: only contributes to price if lp_impacts_price=True
+        # Both compound together in the vault. Yield scales via compound_ratio.
         self.buy_usdc = D(0)
         self.lp_usdc = D(0)
 
@@ -345,7 +364,10 @@ class LP:
     # └───────────────────────────────────────────────────────────────────────┘
 
     def get_exposure(self) -> D:
-        """Exposure decays linearly as more tokens are minted toward CAP."""
+        """How much of the supply is exposed to price impact."""
+        # D(1000) scaling: at ~1M minted tokens, exposure reaches 0 and the
+        # curve flattens. Makes small test buys (500 USDC) produce visible
+        # price movement against a 1B token cap.
         effective = min(self.minted * D(1000), CAP)
         exposure = EXPOSURE_FACTOR * (D(1) - effective / CAP)
         return max(D(0), exposure)
@@ -355,21 +377,29 @@ class LP:
 
         Prevents extreme price swings on early, low-liquidity trades.
         """
+        # Allow disabling for isolation testing
+        if DISABLE_VIRTUAL_LIQUIDITY:
+            return D(0)
+        
         base = CAP / EXPOSURE_FACTOR
         effective = min(self.buy_usdc, VIRTUAL_LIMIT)
         liquidity = base * (D(1) - effective / VIRTUAL_LIMIT)
-        token_reserve = self._get_token_reserve()
-        floor_liquidity = token_reserve - self._get_effective_usdc()
-        return max(D(0), liquidity, floor_liquidity)
+        
+        # Removed floor_liquidity - it can go negative and causes accounting drift
+        # Virtual liquidity should decay smoothly to zero based only on buy_usdc
+        return max(D(0), liquidity)
 
     def _get_token_reserve(self) -> D:
+        """Available tokens for CP curve: (CAP - minted) / exposure_factor."""
         exposure = self.get_exposure()
         return (CAP - self.minted) / exposure if exposure > 0 else CAP - self.minted
 
     def _get_usdc_reserve(self) -> D:
+        """USDC side of CP curve: effective_usdc + virtual_liquidity."""
         return self._get_effective_usdc() + self.get_virtual_liquidity()
 
     def _update_k(self):
+        """Recompute CP invariant k = token_reserve * usdc_reserve."""
         self.k = self._get_token_reserve() * self._get_usdc_reserve()
 
     # ┌───────────────────────────────────────────────────────────────────────┐
@@ -378,11 +408,12 @@ class LP:
 
     @property
     def price(self) -> D:
+        """Current spot price. CP: reserve ratio. Integral curves: base_price * multiplier."""
         if self.curve_type == CurveType.CONSTANT_PRODUCT:
             token_reserve = self._get_token_reserve()
             usdc_reserve = self._get_usdc_reserve()
             if token_reserve == 0:
-                return D(1)
+                return D(1)  # Fallback: no tokens available, default to base price
             return usdc_reserve / token_reserve
         else:
             # Integral curves: base curve price at current supply, scaled by multiplier
@@ -402,11 +433,14 @@ class LP:
     # └───────────────────────────────────────────────────────────────────────┘
 
     def _apply_fair_share_cap(self, requested: D, user_fraction: D) -> D:
+        """Hard cap on a single withdrawal to user's proportional vault share."""
         vault_available = self.vault.balance_of()
         fair_share = user_fraction * vault_available
         return min(requested, fair_share, vault_available)
 
     def _get_fair_share_scaling(self, requested_total_usdc: D, user_principal: D, total_principal: D) -> D:
+        """Scaling factor (0-1) to proportionally reduce all LP withdrawal components.
+        Returns min(1, fair_share/requested, vault/requested)."""
         vault_available = self.vault.balance_of()
         if total_principal > 0 and requested_total_usdc > 0:
             fraction = user_principal / total_principal
@@ -421,6 +455,7 @@ class LP:
     # └───────────────────────────────────────────────────────────────────────┘
 
     def mint(self, amount: D):
+        """Mint new tokens into pool. Reverts if would exceed CAP."""
         if self.minted + amount > CAP:
             raise Exception("Cannot mint over cap")
         self.balance_token += amount
@@ -473,9 +508,6 @@ class LP:
         self.buy_usdc += amount
         self.user_buy_usdc[user.name] = self.user_buy_usdc.get(user.name, D(0)) + amount
         self.rehypo()
-
-        if self.curve_type == CurveType.CONSTANT_PRODUCT:
-            self._update_k()
 
     # ┌───────────────────────────────────────────────────────────────────────┐
     # │                             SELL                                      │
@@ -544,9 +576,6 @@ class LP:
         self.balance_usd -= out_amount
         user.balance_usd += out_amount
 
-        if self.curve_type == CurveType.CONSTANT_PRODUCT:
-            self._update_k()
-
     # ┌───────────────────────────────────────────────────────────────────────┐
     # │                        ADD LIQUIDITY                                  │
     # └───────────────────────────────────────────────────────────────────────┘
@@ -560,6 +589,9 @@ class LP:
         self.lp_usdc += usd_amount
         self.rehypo()
 
+        # KNOWN BUG: _update_k() should not be called here. For YN models,
+        # reserves are invariant to LP operations. Inflates k -> sell recovers
+        # less USDC -> ~20k vault residual in CYN. See .claude/math/PLAN.md FIX 1.
         if self.curve_type == CurveType.CONSTANT_PRODUCT:
             self._update_k()
 
@@ -621,6 +653,8 @@ class LP:
         del self.liquidity_token[user.name]
         del self.liquidity_usd[user.name]
         
+        # KNOWN BUG: Same as add_liquidity — _update_k() should not be called
+        # here for YN models. See .claude/math/PLAN.md FIX 1.
         if self.curve_type == CurveType.CONSTANT_PRODUCT:
             self._update_k()
 
@@ -629,6 +663,7 @@ class LP:
     # └───────────────────────────────────────────────────────────────────────┘
 
     def print_stats(self, label: str = "Stats"):
+        """Debug output: reserves, price, k, vault balance."""
         C = Color
         print(f"\n{C.CYAN}  ┌─ {label} ─────────────────────────────────────────{C.END}")
 

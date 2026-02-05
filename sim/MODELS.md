@@ -49,7 +49,7 @@ The 4 active models differ only by curve type:
 
 ## Archived Models
 
-The following 12 models have been explored and archived. They remain available for backwards compatibility and research but are not recommended for production use.
+The following 12 models have been explored and archived. They remain available in the codebase for research and comparison but are not recommended for production use.
 
 | Codename | Curve Type | Yield → Price | LP → Price | Archive Reason |
 |----------|-----------|:---:|:---:|----------------|
@@ -71,7 +71,7 @@ The following 12 models have been explored and archived. They remain available f
 
 ## Curve Type Summary
 
-Each curve type brings different characteristics to the model. See [CURVES.md](./CURVES.md) for detailed formulas and behavior analysis.
+See [MATH.md](./MATH.md) for detailed formulas, integrals, and behavior analysis.
 
 | Curve | Price Discovery | Slippage | Fairness | Complexity |
 |-------|----------------|----------|----------|------------|
@@ -79,22 +79,6 @@ Each curve type brings different characteristics to the model. See [CURVES.md](.
 | **Exponential** | Very strong | Very high at scale | Low (favors early) | Medium |
 | **Sigmoid** | Phased (slow → fast → plateau) | Moderate | High | High |
 | **Logarithmic** | Moderate | Decreasing over time | Moderate-High | Medium |
-
-### Constant Product
-
-Standard AMM (`x * y = k`). Proven in production. Natural price discovery with symmetric slippage on both buy and sell. Moderate fairness — slippage creates buy/sell spread that disadvantages round-trip trades.
-
-### Exponential
-
-Price grows exponentially with supply (`base_price * e^(k*s)`). Aggressive price discovery that heavily rewards early participants. Steep curve creates high slippage at scale. May conflict with the "common good" principle by structurally favoring early entrants.
-
-### Sigmoid
-
-S-shaped price curve with three phases: slow start, rapid growth, plateau (`max_price / (1 + e^(-k*(s - midpoint)))`). Fair to both early and late participants. Bounded price ceiling provides stability at maturity but may reduce incentive in plateau phase.
-
-### Logarithmic
-
-Diminishing growth (`base_price * ln(1 + k*s)`). Early buyers rewarded but not excessively. Slippage decreases as supply grows, favoring larger/later pools. Unbounded price but with diminishing returns that may reduce late-stage interest.
 
 ---
 
@@ -106,7 +90,5 @@ Diminishing growth (`base_price * ln(1 + k*s)`). Early buyers rewarded but not e
 | **Yield → Price = No** | Price reflects pure demand | No direct effect | Cleaner signal | Simpler price calculation |
 | **LP → Price = Yes** | LP events move price (can disadvantage) | LP adds/removes create slippage | Richer signal (demand + liquidity) | Unified reserves |
 | **LP → Price = No** | LP is price-neutral (fairer) | No LP slippage | Price = pure buy/sell | Dual tracking (buy_usdc vs lp_usdc) |
-| **Constant Product** | Moderate | High | Strong | Low |
-| **Exponential** | Low (early bias) | Very high | Very strong | Medium |
-| **Sigmoid** | High (lifecycle) | Moderate | Phased | High |
-| **Logarithmic** | Moderate-High | Decreasing | Moderate | Medium |
+
+For curve-specific tradeoffs, see the [Curve Type Summary](#curve-type-summary) above.

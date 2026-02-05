@@ -56,7 +56,7 @@ flowchart LR
 
 ## This Is a Testfield
 
-The `math/` directory contains Python models that simulate the protocol under various configurations. The purpose is to **validate math and choose the correct model** before writing Solidity contracts.
+The `sim/` directory contains Python models that simulate the protocol under various configurations. The purpose is to **validate math and choose the correct model** before writing Solidity contracts.
 
 Each model is defined by its **bonding curve type**:
 - **Constant Product** (CYN), **Exponential** (EYN), **Sigmoid** (SYN), **Logarithmic** (LYN)
@@ -66,7 +66,22 @@ Fixed invariants across all models:
 - **LP → Price = No** — adding/removing liquidity is price-neutral
 - **Token Inflation = Yes** — LPs receive minted tokens as yield
 
-See [MODELS.md](math/MODELS.md) for the full model matrix and [CURVES.md](math/CURVES.md) for bonding curve analysis.
+See [MODELS.md](sim/MODELS.md) for the full model matrix and [MATH.md](sim/MATH.md) for bonding curve formulas and analysis.
+
+---
+
+## How to Run
+
+```bash
+# Run the default scenario (whale scenario across all models)
+python3 sim/run_model.py
+
+# Run tests
+python3 -m sim.test.run_all
+
+# Run yield accounting test
+python3 sim/test/test_yield_accounting.py
+```
 
 ---
 
