@@ -26,6 +26,10 @@ DUST = D("1E-12")
 # Vault yield
 VAULT_APY = D(5) / D(100)
 
+# Token inflation for LPs: scales how much of vault APY is mirrored as token minting.
+# 1.0 = same as vault APY (default), 0.0 = no token inflation.
+TOKEN_INFLATION_FACTOR = D(1)
+
 # ┌───────────────────────────────────────────────────────────────────────────┐
 # │ Curve-Specific Tuning (calibrated for ~500 USDC test buys)                │
 # └───────────────────────────────────────────────────────────────────────────┘
@@ -157,12 +161,12 @@ class Vault:
     Tracks deposited USDC and grows it via a compounding index.
     Snapshots allow computing accrued yield between any two points in time.
     """
-    def __init__(self):
-        self.apy = VAULT_APY
-        self.balance_usd = D(0)
-        self.compounding_index = D(1.0)
+    def __init__(self, apy: D = VAULT_APY):
+        self.apy: D = apy
+        self.balance_usd: D = D(0)
+        self.compounding_index: D = D(1)
         self.snapshot: Optional[CompoundingSnapshot] = None
-        self.compounds = 0
+        self.compounds: int = 0
 
     def balance_of(self) -> D:
         """Current vault value, scaled by compounding growth since last snapshot."""
@@ -241,6 +245,7 @@ def _sig_integral(a: D, b: D) -> D:
     def F(x: D) -> D:
         arg = SIG_K * (x - SIG_MIDPOINT)
         if arg > MAX_EXP_ARG:
+            # For large arg, ln(1+e^x) ≈ x (linear). Avoids Decimal overflow.
             return (SIG_MAX_PRICE / SIG_K) * arg
         return (SIG_MAX_PRICE / SIG_K) * (D(1) + arg.exp()).ln()
     return F(b) - F(a)
@@ -304,11 +309,13 @@ def _bisect_tokens_for_cost(supply: D, cost: D, integral_fn: Callable[[D, D], D]
 
 class LP:
     def __init__(self, vault: Vault, curve_type: CurveType,
-                 yield_impacts_price: bool, lp_impacts_price: bool):
+                 yield_impacts_price: bool, lp_impacts_price: bool,
+                 token_inflation_factor: D = TOKEN_INFLATION_FACTOR):
         self.vault = vault
         self.curve_type = curve_type
         self.yield_impacts_price = yield_impacts_price
         self.lp_impacts_price = lp_impacts_price
+        self.token_inflation_factor = token_inflation_factor
 
         # Pool balances
         self.balance_usd = D(0)
@@ -398,10 +405,6 @@ class LP:
         """USDC side of CP curve: effective_usdc + virtual_liquidity."""
         return self._get_effective_usdc() + self.get_virtual_liquidity()
 
-    def _update_k(self):
-        """Recompute CP invariant k = token_reserve * usdc_reserve."""
-        self.k = self._get_token_reserve() * self._get_usdc_reserve()
-
     # ┌───────────────────────────────────────────────────────────────────────┐
     # │                            Price                                      │
     # └───────────────────────────────────────────────────────────────────────┘
@@ -483,6 +486,7 @@ class LP:
         if self.curve_type == CurveType.CONSTANT_PRODUCT:
             if self.k is None:
                 self.k = self._get_token_reserve() * self._get_usdc_reserve()
+            assert self.k is not None  # type narrowing for pyright
             token_reserve = self._get_token_reserve()
             usdc_reserve = self._get_usdc_reserve()
             new_usdc = usdc_reserve + amount
@@ -532,11 +536,16 @@ class LP:
         if self.curve_type == CurveType.CONSTANT_PRODUCT:
             if self.k is None:
                 self.k = self._get_token_reserve() * self._get_usdc_reserve()
+            assert self.k is not None  # type narrowing for pyright
             token_reserve = self._get_token_reserve()
             usdc_reserve = self._get_usdc_reserve()
             new_token = token_reserve + amount
             new_usdc = self.k / new_token
-            raw_out = usdc_reserve - new_usdc
+            # CP curve boundary: when USDC is depleted by prior sells,
+            # k/new_token can exceed remaining reserves. Floor to 0
+            # (user receives nothing). This is geometrically expected
+            # on a fully-drained curve, not a math error.
+            raw_out = max(D(0), usdc_reserve - new_usdc)
             self.minted -= amount
         else:
             self.minted -= amount
@@ -589,12 +598,6 @@ class LP:
         self.lp_usdc += usd_amount
         self.rehypo()
 
-        # KNOWN BUG: _update_k() should not be called here. For YN models,
-        # reserves are invariant to LP operations. Inflates k -> sell recovers
-        # less USDC -> ~20k vault residual in CYN. See .claude/math/PLAN.md FIX 1.
-        if self.curve_type == CurveType.CONSTANT_PRODUCT:
-            self._update_k()
-
         # Snapshot compounding index for yield calculation on removal
         self.user_snapshot[user.name] = UserSnapshot(self.vault.compounding_index)
         self.liquidity_token[user.name] = self.liquidity_token.get(user.name, D(0)) + token_amount
@@ -617,7 +620,8 @@ class LP:
         usd_yield = usd_deposit * (delta - D(1))
         usd_amount_full = usd_deposit + usd_yield
 
-        token_yield_full = token_deposit * (delta - D(1))
+        inflation_delta = D(1) + (delta - D(1)) * self.token_inflation_factor
+        token_yield_full = token_deposit * (inflation_delta - D(1))
 
         buy_usdc_yield_full = buy_usdc_principal * (delta - D(1))
         total_usdc_full = usd_amount_full + buy_usdc_yield_full
@@ -652,11 +656,6 @@ class LP:
 
         del self.liquidity_token[user.name]
         del self.liquidity_usd[user.name]
-        
-        # KNOWN BUG: Same as add_liquidity — _update_k() should not be called
-        # here for YN models. See .claude/math/PLAN.md FIX 1.
-        if self.curve_type == CurveType.CONSTANT_PRODUCT:
-            self._update_k()
 
     # ┌───────────────────────────────────────────────────────────────────────┐
     # │                        Debug Output                                   │
@@ -738,11 +737,25 @@ class ScenarioResult(TypedDict, total=False):
 # ║                           MODEL FACTORY                                   ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 
-def create_model(codename: str) -> Tuple[Vault, LP]:
-    """Create a (Vault, LP) pair for the given model codename."""
+def create_model(
+    codename: str,
+    *,
+    vault_apy: Optional[D] = None,
+    token_inflation_factor: Optional[D] = None,
+) -> Tuple[Vault, LP]:
+    """Create a (Vault, LP) pair for the given model codename.
+
+    Optional overrides allow tests to vary parameters without monkeypatching globals.
+    """
     cfg = MODELS[codename]
-    vault = Vault()
-    lp = LP(vault, cfg["curve"], cfg["yield_impacts_price"], cfg["lp_impacts_price"])
+    vault = Vault(apy=vault_apy if vault_apy is not None else VAULT_APY)
+    lp = LP(
+        vault, cfg["curve"], cfg["yield_impacts_price"], cfg["lp_impacts_price"],
+        token_inflation_factor=(
+            token_inflation_factor if token_inflation_factor is not None
+            else TOKEN_INFLATION_FACTOR
+        ),
+    )
     return vault, lp
 
 def model_label(codename: str) -> str:

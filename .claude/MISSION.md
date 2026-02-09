@@ -43,7 +43,7 @@
 **The buy_usdc_yield going to LPs in `remove_liquidity()` is INTENTIONAL.**
 
 ```python
-# core.py:622-623 — THIS IS CORRECT, NOT A BUG
+# core.py:612-613 — THIS IS CORRECT, NOT A BUG
 buy_usdc_yield_full = buy_usdc_principal * (delta - D(1))
 total_usdc_full = usd_amount_full + buy_usdc_yield_full
 ```

@@ -47,13 +47,13 @@ sim/
 | `LP.__init__` | 305-335 | State: buy_usdc, lp_usdc, minted, k, user tracking dicts |
 | `_get_effective_usdc()` | 338-355 | Yield-adjusted pricing input: `buy_usdc * (vault/principal)` |
 | `_get_price_multiplier()` | 356-361 | `effective_usdc / buy_usdc` — scales integral curve prices |
-| Virtual reserves (CYN) | 366-403 | `get_exposure`, `get_virtual_liquidity`, `_get_token/usdc_reserve`, `_update_k` |
-| `price` property | 410-429 | Spot price: CP uses reserves ratio; integral curves use `base * multiplier` |
-| Fair share cap | 435-448 | `_apply_fair_share_cap`, `_get_fair_share_scaling` |
-| `buy()` | 478-510 | USDC -> tokens. CP: k-invariant. Integral: bisect for token count. |
-| `sell()` | 516-577 | Tokens -> USDC. Includes fair share cap, buy_usdc tracking. |
-| `add_liquidity()` | 583-601 | Deposits tokens+USDC. Calls `_update_k()` (BUG — see PLAN.md FIX 1). |
-| `remove_liquidity()` | 607-659 | LP withdrawal: principal + yield + token inflation. |
+| Virtual reserves (CYN) | 366-399 | `get_exposure`, `get_virtual_liquidity`, `_get_token/usdc_reserve` |
+| `price` property | 406-425 | Spot price: CP uses reserves ratio; integral curves use `base * multiplier` |
+| Fair share cap | 431-447 | `_apply_fair_share_cap`, `_get_fair_share_scaling` |
+| `buy()` | 474-506 | USDC -> tokens. CP: k-invariant. Integral: bisect for token count. |
+| `sell()` | 512-573 | Tokens -> USDC. Includes fair share cap, buy_usdc tracking. |
+| `add_liquidity()` | 579-592 | Deposits tokens+USDC pair. |
+| `remove_liquidity()` | 597-645 | LP withdrawal: principal + yield + token inflation. |
 
 ## Current Situation
 
@@ -61,11 +61,12 @@ sim/
 
 | Model | Vault Residual | Root Cause | Fix Status |
 |-------|---------------|-----------|------------|
-| **CYN** | ~20k USDC | `_update_k()` inflates k 5.79x during LP ops | FIX 1 ready |
+| **CYN** | **0 USDC** | ~~`_update_k()` inflated k 5.79x~~ | FIX 1 applied |
 | **EYN** | ~7k USDC | Price multiplier asymmetry on exponential curve | Under analysis |
 | **SYN** | **0 USDC** | Sigmoid ceiling makes integral linear — perfect symmetry | Done |
 | **LYN** | ~33 USDC | Same multiplier asymmetry, dampened by log gentleness | Low priority |
 
 For root cause analysis, see [math/FINDINGS.md](./math/FINDINGS.md). For yield design rationale (why buy_usdc_yield to LPs is intentional), see [MISSION.md](./MISSION.md).
 
-**Next steps**: See [math/PLAN.md](./math/PLAN.md) — FIX 1 (remove `_update_k` from LP ops) is highest-impact.
+**Applied fixes**: FIX 1 (remove k-inflation), FIX 2 (guard negative raw_out), FIX 3 (parametrize token inflation).
+**Next steps**: See [math/PLAN.md](./math/PLAN.md) — Phase 3: Reassess EYN/LYN residuals with inflation isolation testing.

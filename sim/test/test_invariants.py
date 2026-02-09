@@ -78,7 +78,7 @@ def test_invariants_hold_after_mixed_ops(model: str):
 # ───────────────────────────────────────────────────────────────────────────
 
 def test_k_stable_during_swaps(model: str):
-    """For CYN: k should not change during buy/sell (only LP ops)"""
+    """For CYN: k should not change during buy/sell."""
     if model != "CYN":
         return
     
@@ -95,22 +95,22 @@ def test_k_stable_during_swaps(model: str):
     assert lp.k == k_initial, f"k changed during sell: {k_initial} → {lp.k}"
 
 
-def test_k_changes_during_lp_ops(model: str):
-    """For CYN: k should change when adding/removing liquidity"""
+def test_k_stable_during_lp_ops(model: str):
+    """For CYN: k should NOT change during LP operations (FIX 1)."""
     if model != "CYN":
         return
-    
+
     vault, lp = create_model(model)
     user = User("alice", D(5000))
-    
+
     lp.buy(user, D(500))
     k_before_lp = lp.k
-    
+
     lp.add_liquidity(user, user.balance_token / 2, D(300))
     k_after_add = lp.k
-    
-    assert k_after_add != k_before_lp, \
-        f"k should change during add_liquidity (stayed at {k_after_add})"
+
+    assert k_after_add == k_before_lp, \
+        f"k should not change during add_liquidity (was {k_before_lp}, now {k_after_add})"
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -122,5 +122,5 @@ ALL_TESTS = [
     ("User LP USDC sums to pool", test_user_lp_usdc_sums_to_pool),
     ("Invariants after mixed ops", test_invariants_hold_after_mixed_ops),
     ("K stable during swaps", test_k_stable_during_swaps),
-    ("K changes during LP ops", test_k_changes_during_lp_ops),
+    ("K stable during LP ops", test_k_stable_during_lp_ops),
 ]

@@ -338,16 +338,12 @@ Examples:
     verbose = len(codes) == 1
     verbosity = args.verbose  # 1, 2, or 3
     
+    # Verbosity level for scenario output
+    v: int = args.verbose if args.verbose > 0 else 1
+
     # Show comparison table only when no specific flags and multiple models
     if run_all and not verbose:
         run_comparison(codes)
-    else:
-        # Run requested scenarios (verbose for all models when flags specified)
-        # Default to 1 (Normal) if no flags, otherwise use flag count
-        # -v (1) -> 1 (Normal)
-        # -vv (2) -> 2 (Verbose)
-        # -vvv (3) -> 3 (Debug)
-        v = args.verbose if args.verbose > 0 else 1
     
     # Run specific scenario if flags provided
     if args.single:

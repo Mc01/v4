@@ -9,40 +9,25 @@ For raw verification data, see [VALUES.md](./VALUES.md).
 
 ---
 
-## FIX 1: Remove k-Inflation from LP Operations (CYN)
+## FIX 1: Remove k-Inflation from LP Operations (CYN) — DONE
 
 **Priority**: HIGH | **Risk**: LOW | **Impact**: ~20k USDC residual eliminated
+**Status**: **APPLIED** — `_update_k()` calls removed from `add_liquidity()` and `remove_liquidity()`.
 
-### What to change
+### What was changed
 
-Remove `_update_k()` calls from `add_liquidity()` and `remove_liquidity()`. For YN models, reserves are invariant to LP operations, so k should not change.
+Removed `_update_k()` calls from `add_liquidity()` and `remove_liquidity()`. For YN models, reserves are invariant to LP operations, so k should not change.
 
-```
-File: sim/core.py
+### Result
 
-Line 595-596 (in add_liquidity) — DELETE these two lines:
-    if self.curve_type == CurveType.CONSTANT_PRODUCT:
-        self._update_k()
-
-Line 658-659 (in remove_liquidity) — DELETE these two lines:
-    if self.curve_type == CurveType.CONSTANT_PRODUCT:
-        self._update_k()
-```
-
-### Verify
-
-```bash
-python3 sim/run_model.py   # Run whale scenario for CYN, check vault residual
-python3 -m sim.test.run_all # Ensure no regressions
-```
-
-Expected: CYN whale residual drops from ~20k to near 0. Other models unchanged.
+CYN whale residual dropped from ~20k to ~0 USDC. Other models unchanged.
 
 ---
 
-## FIX 2: Guard Against Negative raw_out (CYN)
+## FIX 2: Guard Against Negative raw_out (CYN) — DONE
 
 **Priority**: MEDIUM | **Risk**: NONE | **Impact**: Safety fix
+**Status**: **APPLIED** — `raw_out = max(D(0), raw_out)` guard added after CP sell calculation.
 
 ### What to change
 
@@ -51,7 +36,7 @@ Add a guard after the constant product sell calculation.
 ```
 File: sim/core.py
 
-After line 539 (raw_out = usdc_reserve - new_usdc), ADD:
+After line 535 (raw_out = usdc_reserve - new_usdc), ADD:
     raw_out = max(D(0), raw_out)
 ```
 
@@ -61,9 +46,10 @@ Run whale scenario with reversed sell order — no user should receive negative 
 
 ---
 
-## FIX 3: Parametrize Token Inflation
+## FIX 3: Parametrize Token Inflation — DONE
 
 **Priority**: MEDIUM | **Risk**: LOW | **Impact**: Enables isolation testing
+**Status**: **APPLIED** — `TOKEN_INFLATION_FACTOR` constant added, `remove_liquidity()` uses `inflation_delta`.
 
 ### What to change
 
@@ -115,8 +101,8 @@ Defer until after FIX 1-3. Recheck residuals. If EYN is needed, pursue Approach 
 ## Execution Order
 
 ```
-Phase 1: FIX 1 + FIX 2 → run all scenarios → verify CYN improvement
-Phase 2: FIX 3           → test inflation=0, inflation=0.5, inflation=1.0
+Phase 1: FIX 1 + FIX 2 → run all scenarios → verify CYN improvement  ← DONE
+Phase 2: FIX 3           → test inflation=0, inflation=0.5, inflation=1.0  ← DONE
 Phase 3: Reassess         → check if EYN/LYN fixes needed
 Phase 4: Update docs      → record new residual numbers in VALUES.md
 ```

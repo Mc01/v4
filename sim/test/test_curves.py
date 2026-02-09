@@ -11,7 +11,7 @@
 """
 from decimal import Decimal as D
 
-from ..core import create_model, User, DUST
+from ..core import create_model, User, DUST, CAP, _bisect_tokens_for_cost, _exp_integral
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -47,15 +47,19 @@ def test_price_decreases_on_sell(model: str):
 
 
 def test_price_stays_positive(model: str):
-    """Price should never go negative or zero"""
+    """Price should never go negative (zero allowed for log curves at empty supply)"""
     vault, lp = create_model(model)
     user = User("alice", D(5000))
-    
+
     lp.buy(user, D(2000))
     assert lp.price > D(0), f"Price not positive after buy: {lp.price}"
-    
+
     lp.sell(user, user.balance_token)
-    assert lp.price > D(0), f"Price not positive after sell: {lp.price}"
+    if model == "LYN":
+        # Logarithmic curve: price = base * ln(1 + k*supply). At supply=0, ln(1)=0.
+        assert lp.price >= D(0), f"Price went negative after sell: {lp.price}"
+    else:
+        assert lp.price > D(0), f"Price not positive after sell: {lp.price}"
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -127,6 +131,68 @@ def test_usdc_received_reasonable(model: str):
     assert usdc_received <= D(1000), f"Got more than deposited: {usdc_received}"
 
 
+def test_sell_never_returns_negative(model: str):
+    """Sell should never return negative USDC, even on a depleted curve (FIX 2)."""
+    vault, lp = create_model(model)
+    users = [User(f"user{i}", D(5000)) for i in range(5)]
+
+    # All users buy, building up the curve
+    for user in users:
+        lp.buy(user, D(2000))
+
+    # First 4 users sell everything — depletes the curve
+    for user in users[:4]:
+        lp.sell(user, user.balance_token)
+
+    # Last user sells on the depleted curve
+    usdc_before = users[4].balance_usd
+    lp.sell(users[4], users[4].balance_token)
+    usdc_received = users[4].balance_usd - usdc_before
+
+    assert usdc_received >= D(0), \
+        f"Sell returned negative USDC: {usdc_received}"
+
+
+def test_sell_zero_tokens_noop(model: str):
+    """Selling 0 tokens should not change any balances."""
+    vault, lp = create_model(model)
+    user = User("alice", D(1000))
+    lp.buy(user, D(500))
+
+    usdc_before = user.balance_usd
+    tokens_before = user.balance_token
+    vault_before = vault.balance_of()
+
+    lp.sell(user, D(0))
+
+    assert user.balance_usd == usdc_before, "USDC changed on zero sell"
+    assert user.balance_token == tokens_before, "Tokens changed on zero sell"
+    assert vault.balance_of() == vault_before, "Vault changed on zero sell"
+
+
+def test_buy_near_cap(model: str):
+    """Buying a large amount near CAP should not crash."""
+    vault, lp = create_model(model)
+    user = User("whale", D(1_000_000_000))
+
+    # Buy increasingly large amounts — should not throw
+    for amount in [D(1000), D(10_000), D(100_000)]:
+        try:
+            lp.buy(user, amount)
+        except Exception as e:
+            if "Cannot mint over cap" in str(e):
+                break  # Expected when hitting cap
+            raise
+
+    assert user.balance_token > 0, "Should have received some tokens"
+
+
+def test_bisect_zero_cost(model: str):
+    """_bisect_tokens_for_cost with cost=0 should return 0 tokens."""
+    result = _bisect_tokens_for_cost(D(0), D(0), _exp_integral)
+    assert result == D(0), f"Expected 0 tokens for 0 cost, got {result}"
+
+
 # ───────────────────────────────────────────────────────────────────────────
 #                             ALL TESTS
 # ───────────────────────────────────────────────────────────────────────────
@@ -139,4 +205,8 @@ ALL_TESTS = [
     ("Remove liquidity price neutral", test_remove_liquidity_price_neutral),
     ("Tokens received reasonable", test_tokens_received_reasonable),
     ("USDC received reasonable", test_usdc_received_reasonable),
+    ("Sell never returns negative", test_sell_never_returns_negative),
+    ("Sell zero tokens is noop", test_sell_zero_tokens_noop),
+    ("Buy near cap doesn't crash", test_buy_near_cap),
+    ("Bisect zero cost returns zero", test_bisect_zero_cost),
 ]

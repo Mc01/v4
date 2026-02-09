@@ -8,7 +8,7 @@ The vault residual is **not a yield distribution problem — it is a bonding cur
 - All vault yield (LP USDC yield + buy USDC yield) is properly distributed during `remove_liquidity()`.
 - The residual comes from the **sell phase**: bonding curve mechanics prevent full recovery of buy_usdc.
 - SYN has 0 residual because the sigmoid ceiling makes its integral linear at the operating point.
-- CYN has ~20k residual because `_update_k()` inflates k 5.79x during LP operations.
+- CYN had ~20k residual because `_update_k()` inflated k 5.79x during LP operations (resolved by FIX 1).
 - EYN has ~7k because the exponential curve amplifies small price multiplier changes.
 - LYN has ~33 because log growth is gentle, dampening the same multiplier asymmetry.
 
@@ -20,13 +20,15 @@ For the fix plan, see [PLAN.md](./PLAN.md).
 ## Root Cause #1: CYN k-Invariant Inflation
 
 **Impact**: ~90% of CYN's 20k+ vault residual.
-**Location**: `core.py:401-402` (`_update_k`), called from `core.py:595-596` (`add_liquidity`) and `core.py:658-659` (`remove_liquidity`).
+**Location** (historical): `_update_k` was called from `add_liquidity` and `remove_liquidity`. **Resolved by FIX 1** — `_update_k()` calls removed.
 
 ### The Problem
 
-`_update_k()` computes `k = token_reserve * usdc_reserve` where both reserves include virtual components. When called inside `add_liquidity()`, reserves have shifted from buy operations (buy_usdc is higher, virtual liquidity decayed, exposure changed). This inflates k.
+`_update_k()` computed `k = token_reserve * usdc_reserve` where both reserves included virtual components. When called inside `add_liquidity()`, reserves had shifted from buy operations (buy_usdc was higher, virtual liquidity decayed, exposure changed). This inflated k.
 
-In the whale scenario: k goes from **100M to 578M** (5.79x). The whale's single LP operation causes a 4.7x jump. On sells, this inflated k makes the constant product curve extremely tight — selling ALL tokens recovers only ~51% of buy_usdc.
+In the whale scenario: k went from **100M to 578M** (5.79x). The whale's single LP operation caused a 4.7x jump. On sells, this inflated k made the constant product curve extremely tight — selling ALL tokens recovered only ~51% of buy_usdc.
+
+**Status: RESOLVED by FIX 1** — `_update_k()` calls removed from `add_liquidity()` and `remove_liquidity()`.
 
 ### Why k Should NOT Change During LP Operations (YN Models)
 
@@ -45,7 +47,7 @@ See [VALUES.md](./VALUES.md) whale scenario trace for the full step-by-step acco
 ## Root Cause #2: EYN/LYN Price Multiplier Asymmetry
 
 **Impact**: 7,056 USDC (EYN), 33 USDC (LYN).
-**Location**: `core.py:493` (buy: `mult = _get_price_multiplier()`), `core.py:553` (sell: `raw_out = base_return * _get_price_multiplier()`).
+**Location**: `core.py:489` (buy: `mult = _get_price_multiplier()`), `core.py:549` (sell: `raw_out = base_return * _get_price_multiplier()`).
 
 ### The Problem
 
@@ -80,12 +82,13 @@ The sigmoid `price(s) = 2 / (1 + exp(-0.001*s))` saturates at `SIG_MAX_PRICE = 2
 
 ---
 
-## Root Cause #4: Negative raw_out in CYN Sell
+## Root Cause #4: Negative raw_out in CYN Sell — GUARDED
 
-**Impact**: Safety bug — users can compute negative USDC from selling tokens.
-**Location**: `core.py:539` — `raw_out = usdc_reserve - new_usdc`, no guard against negative values.
+**Impact**: Safety bug — users could compute negative USDC from selling tokens.
+**Location**: `core.py:539` — `raw_out = max(D(0), usdc_reserve - new_usdc)`.
+**Status**: **GUARDED** — floor to 0 applied. This is a curve boundary (not a math error): when prior sellers extract most USDC, `k/new_token` exceeds remaining reserves.
 
-When sell order changes (e.g., whale sells first), later sellers face a curve where `k/new_token > current_usdc_reserve`, producing negative raw_out.
+When sell order changes (e.g., whale sells first), later sellers face a curve where `k/new_token > current_usdc_reserve`. The floor returns 0 USDC to the user (curve is fully drained).
 
 ---
 
@@ -146,7 +149,7 @@ These were analyzed as potential design directions:
 Most impactful parameters on vault residual, ranked:
 
 1. **Token inflation** (currently on, tied to VAULT_APY) — mints unbacked tokens that extract USDC
-2. **`_update_k()` in LP ops** — CYN only, 5.79x inflation — FIX 1 target
+2. **`_update_k()` in LP ops** — CYN only, 5.79x inflation — **RESOLVED by FIX 1**
 3. **VAULT_APY** — higher = more yield mismatch; at 0% residual is from pure slippage only
 4. **VIRTUAL_LIMIT** — CYN only; virtual liquidity creates buy/sell asymmetry
 5. **yield_impacts_price = False** — counterintuitively INCREASES residual (yield trapped in vault)

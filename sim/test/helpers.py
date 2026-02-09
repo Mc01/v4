@@ -6,9 +6,6 @@
 from decimal import Decimal as D
 from typing import List, Callable, Tuple
 
-from ..core import create_model, User, Vault, LP, DUST, K
-
-
 MODELS = ["CYN", "EYN", "SYN", "LYN"]
 
 

@@ -369,8 +369,9 @@ This proportional allocation applies regardless of curve type.
 ## Constants
 
 ```
-VAULT_APY = 5%          # Annual percentage yield, compounded daily
-TOKEN_INFLATION = 5%    # Annual token minting rate for LPs, compounded daily (currently tied to VAULT_APY; see FIX 3 in .claude/math/PLAN.md to decouple)
+VAULT_APY = 5%                     # Annual percentage yield, compounded daily
+TOKEN_INFLATION_FACTOR = 1.0       # Scales token minting: 1.0 = same as VAULT_APY, 0.0 = no inflation
+TOKEN_INFLATION = VAULT_APY * TOKEN_INFLATION_FACTOR   # Effective annual token minting rate for LPs
 ```
 
 Curve-specific constants (vary per implementation):

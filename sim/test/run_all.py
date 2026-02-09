@@ -13,6 +13,8 @@ from . import test_conservation
 from . import test_invariants
 from . import test_scenarios
 from . import test_curves
+from . import test_stress
+from . import test_yield_accounting
 
 
 def main():
@@ -37,6 +39,14 @@ def main():
     section_header("CURVE TESTS")
     for name, test_fn in test_curves.ALL_TESTS:
         run_for_all_models(results, test_fn, name)
+
+    section_header("STRESS TESTS")
+    for name, test_fn in test_stress.ALL_TESTS:
+        run_for_all_models(results, test_fn, name)
+
+    section_header("YIELD ACCOUNTING TESTS")
+    for name, test_fn in test_yield_accounting.ALL_TESTS:
+        run_for_all_models(results, test_fn, name)
     
     success = results.print_summary()
     sys.exit(0 if success else 1)
@@ -44,3 +54,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
