@@ -4,7 +4,10 @@
 
 ```bash
 # Run a specific model scenario
-python3 sim/run_model.py
+./run_sim.sh CYN
+
+# Run all models
+./run_sim.sh
 
 # Run tests
 python3 -m sim.test.run_all

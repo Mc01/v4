@@ -18,6 +18,7 @@ Commonwealth is a yield-bearing LP token protocol. Users buy tokens with USDC, p
 | 6 | **[../sim/MATH.md](../sim/MATH.md)** | For protocol math | All formulas, curve integrals, price multiplier mechanism |
 | 7 | **[../sim/MODELS.md](../sim/MODELS.md)** | For model matrix | Codename convention, archived models, tradeoffs |
 | 8 | **[../sim/TEST.md](../sim/TEST.md)** | For test env specifics | Virtual reserves, exposure factor, test-only mechanics |
+| 9 | **[GUIDELINES.md](./GUIDELINES.md)** | For coding standards | Code style, principles, testing philosophy |
 
 ---
 
