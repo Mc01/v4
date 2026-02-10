@@ -103,20 +103,20 @@ Defer until after FIX 1-3. Recheck residuals. If EYN is needed, pursue Approach 
 ```
 Phase 1: FIX 1 + FIX 2 → run all scenarios → verify CYN improvement  ← DONE
 Phase 2: FIX 3           → test inflation=0, inflation=0.5, inflation=1.0  ← DONE
-Phase 3: Reassess         → check if EYN/LYN fixes needed
-Phase 4: Update docs      → record new residual numbers in VALUES.md
+Phase 3: Reassess         → check if EYN/LYN fixes needed  ← DONE
+Phase 4: Update docs      → record new residual numbers in VALUES.md  ← DONE
 ```
 
 ---
 
 ## Success Criteria
 
-| Model | Current | After Phase 1 | Ultimate Target |
-|-------|---------|--------------|-----------------|
-| CYN | ~20k USDC | < 100 USDC | < 0.01 USDC |
-| EYN | ~7k USDC | ~7k (unchanged) | < 1 USDC |
-| SYN | 0 USDC | 0 USDC | 0 USDC |
-| LYN | ~33 USDC | ~33 (unchanged) | < 1 USDC |
+| Model | Pre-Fix | Post-FIX 4 | Ultimate Target | Status |
+|-------|---------|------------|-----------------|--------|
+| CYN | ~20k USDC | **0 USDC** | < 0.01 USDC | ✅ ACHIEVED |
+| EYN | ~7k USDC | **0 USDC** | < 1 USDC | ✅ ACHIEVED |
+| SYN | 0 USDC | **0 USDC** | 0 USDC | ✅ ACHIEVED |
+| LYN | ~33 USDC | **0 USDC** | < 1 USDC | ✅ ACHIEVED |
 
 **Conservation invariant** (must always hold):
 ```

@@ -48,7 +48,7 @@ record LP position: { tokens, usdc, entry_index, timestamp }
 
 ### 3. Vault Compounding
 
-All USDC in vault earns 5% APY, compounded daily.
+All USDC in vault earns APY, compounded daily. Default `vault_apy = 5%` (configurable via `Vault(apy=...)`).
 
 ```
 vault_balance = principal * (1 + apy/365) ^ days

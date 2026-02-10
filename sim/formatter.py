@@ -13,24 +13,11 @@
 from decimal import Decimal as D
 from typing import Optional, Dict
 from enum import IntEnum
+import re
 
+# T1: Import unified Color class from core (aliased as C for brevity)
+from .core import Color as C
 
-# ╔═══════════════════════════════════════════════════════════════════════════╗
-# ║                              ANSI COLORS                                  ║
-# ╚═══════════════════════════════════════════════════════════════════════════╝
-
-class C:
-    """ANSI color codes for terminal output."""
-    PURPLE = '\033[35m'
-    MAGENTA = '\033[95m'
-    BLUE = '\033[94m'
-    CYAN = '\033[96m'
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    RED = '\033[91m'
-    BOLD = '\033[1m'
-    DIM = '\033[2m'
-    END = '\033[0m'
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -73,6 +60,10 @@ def price_change(before: D, after: D) -> str:
         return ""
     change = (after - before) / before
     return f" ({pct(change)})"
+
+
+# Pre-compiled ANSI escape sequence pattern (T5: compile once, not per call)
+_ANSI_RE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -215,6 +206,7 @@ class Formatter:
         if self.verbosity < level:
             return
 
+        # Lazy import: avoids circular dependency (core imports nothing from formatter)
         from .core import CURVE_NAMES, CurveType
 
         print()
@@ -311,9 +303,7 @@ class Formatter:
         print(f"{C.PURPLE}{C.BOLD}║{C.END}   {content}{' ' * (padding - 1)} {C.PURPLE}{C.BOLD}║{C.END}")
 
     def _strip_ansi(self, text: str) -> str:
-        import re
-        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-        return ansi_escape.sub('', text)
+        return _ANSI_RE.sub('', text)
     
     # ┌───────────────────────────────────────────────────────────────────────┐
     # │                          Debug Messages                               │

@@ -137,7 +137,7 @@ These were analyzed as potential design directions:
 |---|-------|--------|--------|
 | 5 | Virtual liquidity phantom USDC (CYN) | Partially addressed by FIX 1 | Re-evaluate after fix |
 | 6 | Fair share cap orphaning USDC | ~10% of CYN residual | Re-evaluate after fix |
-| 7 | Token inflation tied to VAULT_APY | Cannot isolate impact | FIX 3 ready |
+| 7 | Token inflation tied to VAULT_APY | Cannot isolate impact | ✅ FIX 3 DONE |
 | 8 | Price multiplier edge case (buy_usdc=0) | Not observed in practice | Monitor |
 | 9 | Binary search precision | Negligible (1e-12) | Not a concern |
 | 10 | buy_usdc tracking invariant | Not observed broken | Add assertion |

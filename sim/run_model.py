@@ -26,10 +26,12 @@ from typing import Union, cast
 
 from .core import (
     MODELS, ACTIVE_MODELS, CURVE_NAMES, Color,
-    SingleUserResult, MultiUserResult, BankRunResult, ScenarioResult as CoreScenarioResult,
+    SingleUserResult, MultiUserResult, BankRunResult,
+    ScenarioResult,
 )
 
-ScenarioResult = Union[SingleUserResult, MultiUserResult, BankRunResult, CoreScenarioResult]
+# Union of all result types for the comparison table formatter
+AnyScenarioResult = Union[SingleUserResult, MultiUserResult, BankRunResult, ScenarioResult]
 
 from .scenarios import (
     single_user_scenario,
@@ -65,7 +67,7 @@ def run_comparison(codenames: list[str]) -> None:
     # │              Collect Results: Run Every Scenario for Each Model       │
     # └───────────────────────────────────────────────────────────────────────┘
 
-    model_results: dict[str, dict[str, ScenarioResult]] = {}
+    model_results: dict[str, dict[str, AnyScenarioResult]] = {}
     for code in codenames:
         model_results[code] = {
             "single": single_user_scenario(code, verbosity=0),

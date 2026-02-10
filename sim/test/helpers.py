@@ -6,7 +6,9 @@
 from decimal import Decimal as D
 from typing import List, Callable, Tuple
 
-MODELS = ["CYN", "EYN", "SYN", "LYN"]
+from ..core import ACTIVE_MODELS
+
+MODELS = ACTIVE_MODELS
 
 
 class TestResults:

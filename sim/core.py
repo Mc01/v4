@@ -5,6 +5,7 @@ Contains all core classes, constants, and utilities used by run_model.py and sce
 """
 from decimal import Decimal as D
 from typing import Callable, Dict, List, Optional, Tuple, TypedDict
+from dataclasses import dataclass
 from enum import Enum
 
 
@@ -30,19 +31,24 @@ VAULT_APY = D(5) / D(100)
 # 1.0 = same as vault APY (default), 0.0 = no token inflation.
 TOKEN_INFLATION_FACTOR = D(1)
 
-# ┌───────────────────────────────────────────────────────────────────────────┐
-# │ Curve-Specific Tuning (calibrated for ~500 USDC test buys)                │
-# └───────────────────────────────────────────────────────────────────────────┘
+@dataclass(frozen=True)
+class CurveConfig:
+    """Immutable curve parameters. One instance per curve type."""
+    base_price: D
+    k: D
+    max_price: D = D(0)    # Only used by sigmoid
+    midpoint: D = D(0)     # Only used by sigmoid
 
-EXP_BASE_PRICE = D(1)
-EXP_K = D("0.0002")         # 500 USDC -> ~477 tokens
+# Calibrated for ~500 USDC test buys
+EXP_CFG = CurveConfig(base_price=D(1), k=D("0.0002"))          # → ~477 tokens
+SIG_CFG = CurveConfig(base_price=D(1), k=D("0.001"),
+                      max_price=D(2), midpoint=D(0))            # → ~450 tokens
+LOG_CFG = CurveConfig(base_price=D(1), k=D("0.01"))            # → ~510 tokens
 
-SIG_MAX_PRICE = D(2)
-SIG_K = D("0.001")          # 500 USDC -> ~450 tokens
-SIG_MIDPOINT = D(0)
-
-LOG_BASE_PRICE = D(1)
-LOG_K = D("0.01")           # 500 USDC -> ~510 tokens
+# Backward-compatible aliases (used by curve functions and external imports)
+EXP_BASE_PRICE, EXP_K = EXP_CFG.base_price, EXP_CFG.k
+SIG_MAX_PRICE, SIG_K, SIG_MIDPOINT = SIG_CFG.max_price, SIG_CFG.k, SIG_CFG.midpoint
+LOG_BASE_PRICE, LOG_K = LOG_CFG.base_price, LOG_CFG.k
 
 # ┌───────────────────────────────────────────────────────────────────────────┐
 # │ Testing & Debugging Configuration                                         │
@@ -110,7 +116,9 @@ ACTIVE_MODELS: List[str] = [code for code, cfg in MODELS.items() if not cfg["dep
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 
 class Color:
+    """ANSI color codes for terminal output. Single source of truth — import from here."""
     HEADER = '\033[95m'
+    MAGENTA = '\033[95m'   # alias for HEADER (used by formatter)
     PURPLE = '\033[35m'
     BLUE = '\033[94m'
     CYAN = '\033[96m'
@@ -163,7 +171,6 @@ class Vault:
     """
     def __init__(self, apy: D = VAULT_APY):
         self.apy: D = apy
-        self.balance_usd: D = D(0)
         self.compounding_index: D = D(1)
         self.snapshot: Optional[CompoundingSnapshot] = None
         self.compounds: int = 0
@@ -171,21 +178,24 @@ class Vault:
     def balance_of(self) -> D:
         """Current vault value, scaled by compounding growth since last snapshot."""
         if self.snapshot is None:
-            return self.balance_usd
+            return D(0)
         return self.snapshot.value * (self.compounding_index / self.snapshot.index)
 
     def add(self, value: D):
         self.snapshot = CompoundingSnapshot(value + self.balance_of(), self.compounding_index)
-        self.balance_usd = self.balance_of()
 
     def remove(self, value: D):
         if self.snapshot is None:
             raise Exception("Nothing staked!")
         self.snapshot = CompoundingSnapshot(self.balance_of() - value, self.compounding_index)
-        self.balance_usd = self.balance_of()
 
     def compound(self, days: int):
-        """Advance the compounding index by N days of daily APY accrual."""
+        """Advance the compounding index by N days of daily APY accrual.
+
+        Note: O(days) loop — each day multiplied individually to match
+        discrete daily compounding. For Solidity translation, consider
+        using exponentiation: index *= (1 + apy/365) ** days.
+        """
         for _ in range(days):
             self.compounding_index *= D(1) + (self.apy / D(365))
         self.compounds += days
@@ -221,7 +231,11 @@ MAX_EXP_ARG = D(700)
 # └─────────────────────────────────────┘
 
 def _exp_integral(a: D, b: D) -> D:
-    """Integral of base * e^(k*x) from a to b."""
+    """Integral of base * e^(k*x) from a to b.
+
+    Note: For very negative exp_a_arg, exp() gracefully underflows to ~0
+    in Python's Decimal. This is correct — the integral from -∞ is finite.
+    """
     exp_b_arg = EXP_K * b
     exp_a_arg = EXP_K * a
     
@@ -268,6 +282,8 @@ def _log_integral(a: D, b: D) -> D:
     return F(b) - F(a)
 
 def _log_price(s: D) -> D:
+    """Logarithmic spot price. Returns 0 at s=0 (ln(1)=0) — this is by design;
+    the integral from 0 is well-defined and the first tokens cost near-zero USDC."""
     val = D(1) + LOG_K * s
     return LOG_BASE_PRICE * val.ln() if val > 0 else D(0)
 
@@ -361,10 +377,29 @@ class LP:
         return base
 
     def _get_price_multiplier(self) -> D:
-        """Scaling factor for integral curves: effective_usdc / buy_usdc."""
+        """Scaling factor for integral curve buys: effective_usdc / buy_usdc.
+        
+        Includes yield inflation when yield_impacts_price=True.
+        Used for buy pricing — more expensive tokens when vault has compounded.
+        """
         if self.buy_usdc == 0:
             return D(1)
         return self._get_effective_usdc() / self.buy_usdc
+
+    def _get_sell_multiplier(self) -> D:
+        """Scaling factor for integral curve sells: principal-only, no yield.
+
+        FIX 4: Sell returns are based on principal USDC only, not
+        yield-inflated vault. This ensures sell is symmetric with buy
+        (both scale by the same principal ratio) and yield flows
+        exclusively through remove_liquidity.
+        """
+        if self.buy_usdc == 0:
+            return D(1)
+        base = self.buy_usdc
+        if self.lp_impacts_price:
+            base += self.lp_usdc
+        return base / self.buy_usdc
 
     # ┌───────────────────────────────────────────────────────────────────────┐
     # │               Constant Product Virtual Reserves                       │
@@ -559,7 +594,7 @@ class LP:
                 base_return = _log_integral(supply_after, supply_before)
             else:
                 base_return = amount
-            raw_out = base_return * self._get_price_multiplier()
+            raw_out = base_return * self._get_sell_multiplier()
 
         # Cap output to fair share of vault
         original_minted = self.minted + amount
@@ -662,7 +697,10 @@ class LP:
     # └───────────────────────────────────────────────────────────────────────┘
 
     def print_stats(self, label: str = "Stats"):
-        """Debug output: reserves, price, k, vault balance."""
+        """Debug output: reserves, price, k, vault balance.
+
+        DEPRECATED: Use Formatter.stats(label, lp) instead for consistent output.
+        """
         C = Color
         print(f"\n{C.CYAN}  ┌─ {label} ─────────────────────────────────────────{C.END}")
 
@@ -718,19 +756,19 @@ class BankRunResult(TypedDict):
 
 
 class ScenarioResult(TypedDict, total=False):
-    """Unified result type for new scenarios. Uses total=False for optional fields."""
-    # Required fields (always present)
+    """Unified result type for new scenarios. Uses total=False — all fields optional."""
+    # Core fields (always present in practice)
     codename: str
     profits: Dict[str, D]
     vault: D
     
-    # Optional metadata (scenario-specific)
-    winners: Optional[int]
-    losers: Optional[int]
-    total_profit: Optional[D]
-    strategies: Optional[Dict[str, D]]     # LP fraction per user (partial_lp)
-    entry_prices: Optional[Dict[str, D]]   # Price when user entered (late)
-    timeline: Optional[List[str]]          # Event log (real_life)
+    # Scenario-specific metadata
+    winners: int
+    losers: int
+    total_profit: D
+    strategies: Dict[str, D]       # LP fraction per user (partial_lp)
+    entry_prices: Dict[str, D]     # Price when user entered (late)
+    timeline: List[str]            # Event log (real_life)
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗

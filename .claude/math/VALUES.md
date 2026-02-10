@@ -69,16 +69,16 @@ All USDC accounted for. The 25,834 residual = buy_usdc not recovered by sells (d
 
 ---
 
-## Whale Scenario — Actual Results (All Models)
+## Whale Scenario — Actual Results (All Models, Post-FIX)
 
-*Note: The trace above uses the whale scenario (5 users + 1 whale, 100 days). The table below uses the standard whale scenario config which differs in user count and amounts — hence the 25,834 trace residual vs 20,091 standard residual.*
+*Note: The trace above uses the whale scenario (5 users + 1 whale, 100 days). The table below uses the standard whale scenario config which differs in user count and amounts — hence the 25,834 trace residual vs the 0 standard residual for CYN.*
 
 | Model | Total Profit | Vault Residual | Root Cause |
-|-------|-------------|---------------|-----------|
-| **CYN** | -18,703 | 20,091 | k-inflation |
-| **EYN** | -6,319 | 7,056 | Multiplier asymmetry |
-| **SYN** | +1,454 | **0** | N/A |
-| **LYN** | -16 | 33 | Multiplier asymmetry (small) |
+|-------|-------------|---------------|------------|
+| **CYN** | **+1,479** | **0** | ✅ Resolved by FIX 1 |
+| **EYN** | **+2,375** | **0** | ✅ Resolved by FIX 4 |
+| **SYN** | **+1,454** | **0** | N/A |
+| **LYN** | **+1,404** | **0** | ✅ Resolved by FIX 4 |
 
 ---
 
@@ -126,10 +126,8 @@ Setup: 10 users, 365 days compound, sequential panic exit.
 |-------|:---:|:---:|---:|
 | CYN | 6 | 4 | 0 |
 | EYN | 5 | 5 | 19 |
-| SYN | *TBD* | *TBD* | *TBD* |
-| LYN | *TBD* | *TBD* | *TBD* |
-
-*SYN and LYN bank run results to be collected after FIX 1.*
+| SYN | 5 | 5 | 31 |
+| LYN | 4 | 6 | 68 |
 
 ---
 

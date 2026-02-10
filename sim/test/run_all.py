@@ -15,6 +15,7 @@ from . import test_scenarios
 from . import test_curves
 from . import test_stress
 from . import test_yield_accounting
+from . import test_coverage_gaps
 
 
 def main():
@@ -46,6 +47,10 @@ def main():
 
     section_header("YIELD ACCOUNTING TESTS")
     for name, test_fn in test_yield_accounting.ALL_TESTS:
+        run_for_all_models(results, test_fn, name)
+
+    section_header("COVERAGE GAP TESTS")
+    for name, test_fn in test_coverage_gaps.ALL_TESTS:
         run_for_all_models(results, test_fn, name)
     
     success = results.print_summary()

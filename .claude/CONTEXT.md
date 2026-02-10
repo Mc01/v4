@@ -12,8 +12,8 @@
 # Run tests
 python3 -m sim.test.run_all
 
-# Run yield accounting test (documents the buy_usdc_yield behavior)
-python3 sim/test/test_yield_accounting.py
+# Run a specific test module (all test files use relative imports)
+python3 -m sim.test.run_all
 ```
 
 ## File Structure
@@ -57,16 +57,16 @@ sim/
 
 ## Current Situation
 
-**SYN works. CYN, EYN, LYN have vault residuals.**
+**CYN and SYN have zero vault residuals. EYN and LYN have small residuals from multiplier asymmetry.**
 
 | Model | Vault Residual | Root Cause | Fix Status |
 |-------|---------------|-----------|------------|
-| **CYN** | **0 USDC** | ~~`_update_k()` inflated k 5.79x~~ | FIX 1 applied |
-| **EYN** | ~7k USDC | Price multiplier asymmetry on exponential curve | Under analysis |
-| **SYN** | **0 USDC** | Sigmoid ceiling makes integral linear — perfect symmetry | Done |
-| **LYN** | ~33 USDC | Same multiplier asymmetry, dampened by log gentleness | Low priority |
+| **CYN** | **0 USDC** | ~~`_update_k()` inflated k 5.79x~~ | ✅ FIX 1 resolved |
+| **EYN** | ~7k USDC | Price multiplier asymmetry on exponential curve | Deferred |
+| **SYN** | **0 USDC** | Sigmoid ceiling makes integral linear — perfect symmetry | ✅ No fix needed |
+| **LYN** | ~33 USDC | Same multiplier asymmetry, dampened by log gentleness | Deferred (low impact) |
 
 For root cause analysis, see [math/FINDINGS.md](./math/FINDINGS.md). For yield design rationale (why buy_usdc_yield to LPs is intentional), see [MISSION.md](./MISSION.md).
 
-**Applied fixes**: FIX 1 (remove k-inflation), FIX 2 (guard negative raw_out), FIX 3 (parametrize token inflation).
-**Next steps**: See [math/PLAN.md](./math/PLAN.md) — Phase 3: Reassess EYN/LYN residuals with inflation isolation testing.
+**Applied fixes**: FIX 1 (remove k-inflation), FIX 2 (guard negative raw_out), FIX 3 (parametrize token inflation). All 3 fixes applied and verified.
+**Next steps**: See [math/PLAN.md](./math/PLAN.md) — Phase 3: Reassess EYN/LYN residuals; Phase 4: Update VALUES.md with fresh numbers.
