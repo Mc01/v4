@@ -12,20 +12,20 @@
 """
 from decimal import Decimal as D
 from ..core import create_model, model_label, User, K, SingleUserResult
-from ..formatter import Formatter, fmt
+from ..formatter import Formatter
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
 # ║                         PUBLIC API                                        ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 
-def single_user_scenario(codename: str, verbosity: int = 1, verbose: bool = True,
+def single_user_scenario(codename: str, verbosity: int = 1,
                          user_initial_usd: D = 1 * K,
                          buy_amount: D = D(500),
                          compound_days: int = 100) -> SingleUserResult:
     """Run single user full lifecycle scenario."""
     vault, lp = create_model(codename)
-    v = verbosity if verbose else 0
+    v = verbosity
     f = Formatter(v)
     f.set_lp(lp)
     

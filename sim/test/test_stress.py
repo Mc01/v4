@@ -10,10 +10,7 @@
 """
 from decimal import Decimal as D
 
-from ..core import (
-    create_model, User, Vault, LP, DUST,
-    CurveType, EXPOSURE_FACTOR, CAP, VIRTUAL_LIMIT, K, B,
-)
+from ..core import create_model, User, Vault, DUST
 
 
 # ═══════════════════════════════════════════════════════════════════════════

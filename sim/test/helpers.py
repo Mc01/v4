@@ -3,7 +3,6 @@
 ║                     Test Helpers - Shared Utilities                       ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 """
-from decimal import Decimal as D
 from typing import List, Callable, Tuple
 
 from ..core import ACTIVE_MODELS

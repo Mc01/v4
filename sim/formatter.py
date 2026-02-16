@@ -10,10 +10,15 @@
 ║    3 (-vvv) : L2 + every action + rectangular summary after everything    ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 """
+from __future__ import annotations
+
 from decimal import Decimal as D
-from typing import Optional, Dict
+from typing import Optional, TYPE_CHECKING
 from enum import IntEnum
 import re
+
+if TYPE_CHECKING:
+    from .core import LP
 
 # T1: Import unified Color class from core (aliased as C for brevity)
 from .core import Color as C
@@ -75,17 +80,18 @@ class Formatter:
     
     def __init__(self, verbosity: int = 1):
         self.verbosity = verbosity
+        self.lp: Optional[LP] = None
     
     # ┌───────────────────────────────────────────────────────────────────────┐
     # │                         ASCII Art Headers                             │
     # └───────────────────────────────────────────────────────────────────────┘
-    def set_lp(self, lp):
+    def set_lp(self, lp: LP) -> None:
         """Register LP instance for debug stats."""
         self.lp = lp
         
     def _auto_stats(self, action: str):
         """Print stats automatically in DEBUG mode."""
-        if self.verbosity >= V.DEBUG and hasattr(self, 'lp') and self.lp:
+        if self.verbosity >= V.DEBUG and self.lp is not None:
             self.stats(f"Post-{action} State", self.lp, level=V.DEBUG)
     
     # ┌───────────────────────────────────────────────────────────────────────┐
@@ -223,7 +229,7 @@ class Formatter:
         print(f"{C.CYAN}  │{C.END}")
         print(f"{C.CYAN}  │{C.END} {C.BOLD}Liquidity Depth:{C.END}")
         
-        total_lp_tokens = sum(lp.liquidity_token.values()) if lp.liquidity_token else D(0)
+        total_lp_tokens = sum(lp.liquidity_token.values(), D(0))
         buy_principal = lp.buy_usdc
         lp_principal = lp.lp_usdc
         
@@ -260,7 +266,7 @@ class Formatter:
     # ┌───────────────────────────────────────────────────────────────────────┐
     # │                          Final Summary                                │
     # └───────────────────────────────────────────────────────────────────────┘
-    def summary(self, results: Dict[str, D], vault: D, 
+    def summary(self, results: dict[str, D], vault: D, 
                 title: str = "FINAL SUMMARY"):
         """Print final scenario summary with winners/losers."""
         if self.verbosity < V.NORMAL:

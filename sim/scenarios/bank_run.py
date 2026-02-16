@@ -8,7 +8,7 @@
 """
 from decimal import Decimal as D
 from ..core import create_model, model_label, User, K, BankRunResult
-from ..formatter import Formatter, fmt
+from ..formatter import Formatter
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -111,13 +111,13 @@ def _bank_run_impl(codename: str, reverse: bool = False, verbosity: int = 1) -> 
 # ║                         PUBLIC API                                        ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 
-def bank_run_scenario(codename: str, verbosity: int = 1, verbose: bool = True) -> BankRunResult:
+def bank_run_scenario(codename: str, verbosity: int = 1) -> BankRunResult:
     """FIFO exit: first buyer exits first."""
-    v = verbosity if verbose else 0
+    v = verbosity
     return _bank_run_impl(codename, reverse=False, verbosity=v)
 
 
-def reverse_bank_run_scenario(codename: str, verbosity: int = 1, verbose: bool = True) -> BankRunResult:
+def reverse_bank_run_scenario(codename: str, verbosity: int = 1) -> BankRunResult:
     """LIFO exit: last buyer exits first."""
-    v = verbosity if verbose else 0
+    v = verbosity
     return _bank_run_impl(codename, reverse=True, verbosity=v)

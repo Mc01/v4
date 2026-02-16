@@ -8,7 +8,7 @@
 """
 from decimal import Decimal as D
 from ..core import create_model, model_label, User, K, MultiUserResult
-from ..formatter import Formatter, fmt
+from ..formatter import Formatter
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -108,13 +108,13 @@ def _multi_user_impl(codename: str, reverse: bool = False, verbosity: int = 1) -
 # ║                         PUBLIC API                                        ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 
-def multi_user_scenario(codename: str, verbosity: int = 1, verbose: bool = True) -> MultiUserResult:
+def multi_user_scenario(codename: str, verbosity: int = 1) -> MultiUserResult:
     """FIFO exit: first buyer exits first."""
-    v = verbosity if verbose else 0
+    v = verbosity
     return _multi_user_impl(codename, reverse=False, verbosity=v)
 
 
-def reverse_multi_user_scenario(codename: str, verbosity: int = 1, verbose: bool = True) -> MultiUserResult:
+def reverse_multi_user_scenario(codename: str, verbosity: int = 1) -> MultiUserResult:
     """LIFO exit: last buyer exits first."""
-    v = verbosity if verbose else 0
+    v = verbosity
     return _multi_user_impl(codename, reverse=True, verbosity=v)

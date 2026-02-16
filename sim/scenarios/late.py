@@ -152,13 +152,13 @@ def _late_impl(codename: str, wait_days: int, verbosity: int = 1) -> ScenarioRes
 # ║                         PUBLIC API                                        ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 
-def late_90_scenario(codename: str, verbosity: int = 1, verbose: bool = True) -> ScenarioResult:
+def late_90_scenario(codename: str, verbosity: int = 1) -> ScenarioResult:
     """Late entrant after 90 days of compounding."""
-    v = verbosity if verbose else 0
+    v = verbosity
     return _late_impl(codename, 90, v)
 
 
-def late_180_scenario(codename: str, verbosity: int = 1, verbose: bool = True) -> ScenarioResult:
+def late_180_scenario(codename: str, verbosity: int = 1) -> ScenarioResult:
     """Late entrant after 180 days of compounding."""
-    v = verbosity if verbose else 0
+    v = verbosity
     return _late_impl(codename, 180, v)

@@ -4,9 +4,24 @@ Commonwealth Protocol - Core Infrastructure
 Contains all core classes, constants, and utilities used by run_model.py and scenarios.
 """
 from decimal import Decimal as D
-from typing import Callable, Dict, List, Optional, Tuple, TypedDict
+from typing import Callable, Optional, TypedDict
 from dataclasses import dataclass
 from enum import Enum
+from itertools import product as _product
+
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                             EXCEPTIONS                                    ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+class ProtocolError(Exception):
+    """Base exception for all protocol-level errors."""
+
+class MintCapExceeded(ProtocolError):
+    """Raised when minting would exceed the token supply cap."""
+
+class NothingStaked(ProtocolError):
+    """Raised when attempting to remove from an empty vault."""
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -74,7 +89,7 @@ class CurveType(Enum):
     SIGMOID = "S"
     LOGARITHMIC = "L"
 
-CURVE_NAMES: Dict[CurveType, str] = {
+CURVE_NAMES: dict[CurveType, str] = {
     CurveType.CONSTANT_PRODUCT: "Constant Product",
     CurveType.EXPONENTIAL: "Exponential",
     CurveType.SIGMOID: "Sigmoid",
@@ -94,21 +109,22 @@ class ModelConfig(TypedDict):
 # │ Archived: *YY, *NY, *NN (kept for backwards compatibility).               │
 # └───────────────────────────────────────────────────────────────────────────┘
 
-MODELS: Dict[str, ModelConfig] = {}
-for curve_code, curve_type in [("C", CurveType.CONSTANT_PRODUCT), ("E", CurveType.EXPONENTIAL),
-                                ("S", CurveType.SIGMOID), ("L", CurveType.LOGARITHMIC)]:
-    for yield_code, yield_price in [("Y", True), ("N", False)]:
-        for lp_code, lp_price in [("Y", True), ("N", False)]:
-            codename = f"{curve_code}{yield_code}{lp_code}"
-            is_deprecated = not (yield_price and not lp_price)
-            MODELS[codename] = {
-                "curve": curve_type,
-                "yield_impacts_price": yield_price,
-                "lp_impacts_price": lp_price,
-                "deprecated": is_deprecated,
-            }
+MODELS: dict[str, ModelConfig] = {
+    f"{cc}{yc}{lc}": {
+        "curve": ct,
+        "yield_impacts_price": yp,
+        "lp_impacts_price": lp,
+        "deprecated": not (yp and not lp),
+    }
+    for (cc, ct), (yc, yp), (lc, lp) in _product(
+        [("C", CurveType.CONSTANT_PRODUCT), ("E", CurveType.EXPONENTIAL),
+         ("S", CurveType.SIGMOID), ("L", CurveType.LOGARITHMIC)],
+        [("Y", True), ("N", False)],
+        [("Y", True), ("N", False)],
+    )
+}
 
-ACTIVE_MODELS: List[str] = [code for code, cfg in MODELS.items() if not cfg["deprecated"]]
+ACTIVE_MODELS: list[str] = [code for code, cfg in MODELS.items() if not cfg["deprecated"]]
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -152,11 +168,11 @@ class User:
 # │       CompoundingSnapshot           │
 # └─────────────────────────────────────┘
 
+@dataclass(frozen=True)
 class CompoundingSnapshot:
     """Captures vault value at a specific compounding index for delta calculations."""
-    def __init__(self, value: D, index: D):
-        self.value = value
-        self.index = index
+    value: D
+    index: D
 
 
 # ┌─────────────────────────────────────┐
@@ -186,7 +202,7 @@ class Vault:
 
     def remove(self, value: D):
         if self.snapshot is None:
-            raise Exception("Nothing staked!")
+            raise NothingStaked("Nothing staked!")
         self.snapshot = CompoundingSnapshot(self.balance_of() - value, self.compounding_index)
 
     def compound(self, days: int):
@@ -205,10 +221,10 @@ class Vault:
 # │          UserSnapshot               │
 # └─────────────────────────────────────┘
 
+@dataclass(frozen=True)
 class UserSnapshot:
     """Records the compounding index when a user adds liquidity (for yield delta)."""
-    def __init__(self, index: D):
-        self.index = index
+    index: D
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -312,6 +328,19 @@ def _bisect_tokens_for_cost(supply: D, cost: D, integral_fn: Callable[[D, D], D]
     return (lo + hi) / 2
 
 
+# ┌─────────────────────────────────────┐
+# │      Curve Dispatch Table           │
+# └─────────────────────────────────────┘
+
+# Maps integral curve types to their (integral, spot_price) callables.
+# CP is excluded — it uses virtual reserves, not integrals.
+_CURVE_DISPATCH: dict[CurveType, tuple[Callable[[D, D], D], Callable[[D], D]]] = {
+    CurveType.EXPONENTIAL:  (_exp_integral, _exp_price),
+    CurveType.SIGMOID:      (_sig_integral, _sig_price),
+    CurveType.LOGARITHMIC:  (_log_integral, _log_price),
+}
+
+
 # ╔═══════════════════════════════════════════════════════════════════════════╗
 # ║                          LIQUIDITY POOL (LP)                              ║
 # ╠═══════════════════════════════════════════════════════════════════════════╣
@@ -339,10 +368,10 @@ class LP:
         self.minted = D(0)
 
         # Per-user LP positions and buy tracking
-        self.liquidity_token: Dict[str, D] = {}
-        self.liquidity_usd: Dict[str, D] = {}
-        self.user_buy_usdc: Dict[str, D] = {}
-        self.user_snapshot: Dict[str, UserSnapshot] = {}
+        self.liquidity_token: dict[str, D] = {}
+        self.liquidity_usd: dict[str, D] = {}
+        self.user_buy_usdc: dict[str, D] = {}
+        self.user_snapshot: dict[str, UserSnapshot] = {}
 
         # Aggregate USDC tracking — the split is the core of model dimensions:
         # - buy_usdc: always contributes to effective_usdc (price base)
@@ -353,6 +382,11 @@ class LP:
 
         # Constant product invariant
         self.k: Optional[D] = None
+
+        # Curve dispatch: integral and spot price callables (None for CP)
+        _dispatch = _CURVE_DISPATCH.get(self.curve_type)
+        self._integral: Optional[Callable[[D, D], D]] = _dispatch[0] if _dispatch else None
+        self._spot_price: Optional[Callable[[D], D]] = _dispatch[1] if _dispatch else None
 
     # ┌───────────────────────────────────────────────────────────────────────┐
     # │                   Dimension-Aware Pricing                             │
@@ -454,17 +488,8 @@ class LP:
                 return D(1)  # Fallback: no tokens available, default to base price
             return usdc_reserve / token_reserve
         else:
-            # Integral curves: base curve price at current supply, scaled by multiplier
-            s = self.minted
-            if self.curve_type == CurveType.EXPONENTIAL:
-                base = _exp_price(s)
-            elif self.curve_type == CurveType.SIGMOID:
-                base = _sig_price(s)
-            elif self.curve_type == CurveType.LOGARITHMIC:
-                base = _log_price(s)
-            else:
-                base = D(1)
-            return base * self._get_price_multiplier()
+            assert self._spot_price is not None
+            return self._spot_price(self.minted) * self._get_price_multiplier()
 
     # ┌───────────────────────────────────────────────────────────────────────┐
     # │         Fair Share: Caps Withdrawals to Prevent Vault Drain           │
@@ -495,7 +520,7 @@ class LP:
     def mint(self, amount: D):
         """Mint new tokens into pool. Reverts if would exceed CAP."""
         if self.minted + amount > CAP:
-            raise Exception("Cannot mint over cap")
+            raise MintCapExceeded("Cannot mint over cap")
         self.balance_token += amount
         self.minted += amount
 
@@ -528,18 +553,10 @@ class LP:
             new_token = self.k / new_usdc
             out_amount = token_reserve - new_token
         else:
-            # Integral curves: divide cost by multiplier, bisect for token count
             mult = self._get_price_multiplier()
             effective_cost = amount / mult if mult > 0 else amount
-            supply = self.minted
-            if self.curve_type == CurveType.EXPONENTIAL:
-                out_amount = _bisect_tokens_for_cost(supply, effective_cost, _exp_integral)
-            elif self.curve_type == CurveType.SIGMOID:
-                out_amount = _bisect_tokens_for_cost(supply, effective_cost, _sig_integral)
-            elif self.curve_type == CurveType.LOGARITHMIC:
-                out_amount = _bisect_tokens_for_cost(supply, effective_cost, _log_integral)
-            else:
-                out_amount = amount
+            assert self._integral is not None
+            out_amount = _bisect_tokens_for_cost(self.minted, effective_cost, self._integral)
 
         self.mint(out_amount)
         self.balance_token -= out_amount
@@ -586,14 +603,8 @@ class LP:
             self.minted -= amount
             supply_after = self.minted
             supply_before = supply_after + amount
-            if self.curve_type == CurveType.EXPONENTIAL:
-                base_return = _exp_integral(supply_after, supply_before)
-            elif self.curve_type == CurveType.SIGMOID:
-                base_return = _sig_integral(supply_after, supply_before)
-            elif self.curve_type == CurveType.LOGARITHMIC:
-                base_return = _log_integral(supply_after, supply_before)
-            else:
-                base_return = amount
+            assert self._integral is not None
+            base_return = self._integral(supply_after, supply_before)
             raw_out = base_return * self._get_sell_multiplier()
 
         # Cap output to fair share of vault
@@ -692,37 +703,6 @@ class LP:
         del self.liquidity_token[user.name]
         del self.liquidity_usd[user.name]
 
-    # ┌───────────────────────────────────────────────────────────────────────┐
-    # │                        Debug Output                                   │
-    # └───────────────────────────────────────────────────────────────────────┘
-
-    def print_stats(self, label: str = "Stats"):
-        """Debug output: reserves, price, k, vault balance.
-
-        DEPRECATED: Use Formatter.stats(label, lp) instead for consistent output.
-        """
-        C = Color
-        print(f"\n{C.CYAN}  ┌─ {label} ─────────────────────────────────────────{C.END}")
-
-        if self.curve_type == CurveType.CONSTANT_PRODUCT:
-            tr = self._get_token_reserve()
-            ur = self._get_usdc_reserve()
-            print(f"{C.CYAN}  │ Virtual Reserves:{C.END} token={C.YELLOW}{tr:.2f}{C.END}, usdc={C.YELLOW}{ur:.2f}{C.END}")
-            k_val = f"{self.k:.2f}" if self.k else "None"
-            print(f"{C.CYAN}  │ Bonding Curve k:{C.END} {C.YELLOW}{k_val}{C.END}")
-            print(f"{C.CYAN}  │ Exposure:{C.END} {C.YELLOW}{self.get_exposure():.2f}{C.END}  Virtual Liq: {C.YELLOW}{self.get_virtual_liquidity():.2f}{C.END}")
-        else:
-            print(f"{C.CYAN}  │ Curve:{C.END} {C.YELLOW}{CURVE_NAMES[self.curve_type]}{C.END}  Multiplier: {C.YELLOW}{self._get_price_multiplier():.6f}{C.END}")
-
-        total_principal = self.buy_usdc + self.lp_usdc
-        buy_pct = (self.buy_usdc / total_principal * 100) if total_principal > 0 else D(0)
-        lp_pct = (self.lp_usdc / total_principal * 100) if total_principal > 0 else D(0)
-        print(f"{C.CYAN}  │ USDC Split:{C.END} buy={C.YELLOW}{self.buy_usdc:.2f}{C.END} ({buy_pct:.1f}%), lp={C.YELLOW}{self.lp_usdc:.2f}{C.END} ({lp_pct:.1f}%)")
-        print(f"{C.CYAN}  │ Effective USDC:{C.END} {C.YELLOW}{self._get_effective_usdc():.2f}{C.END}")
-        print(f"{C.CYAN}  │ Vault:{C.END} {C.YELLOW}{self.vault.balance_of():.2f}{C.END}  Index: {C.YELLOW}{self.vault.compounding_index:.6f}{C.END} ({self.vault.compounds}d)")
-        print(f"{C.CYAN}  │ Price:{C.END} {C.GREEN}{self.price:.6f}{C.END}  Minted: {C.YELLOW}{self.minted:.2f}{C.END}")
-        print(f"{C.CYAN}  └─────────────────────────────────────────────────────{C.END}\n")
-
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
 # ║                            RESULT TYPES                                   ║
@@ -742,13 +722,13 @@ class SingleUserResult(TypedDict):
 
 class MultiUserResult(TypedDict):
     codename: str
-    profits: Dict[str, D]
+    profits: dict[str, D]
     vault: D
 
 
 class BankRunResult(TypedDict):
     codename: str
-    profits: Dict[str, D]
+    profits: dict[str, D]
     winners: int
     losers: int
     total_profit: D
@@ -759,16 +739,16 @@ class ScenarioResult(TypedDict, total=False):
     """Unified result type for new scenarios. Uses total=False — all fields optional."""
     # Core fields (always present in practice)
     codename: str
-    profits: Dict[str, D]
+    profits: dict[str, D]
     vault: D
     
     # Scenario-specific metadata
     winners: int
     losers: int
     total_profit: D
-    strategies: Dict[str, D]       # LP fraction per user (partial_lp)
-    entry_prices: Dict[str, D]     # Price when user entered (late)
-    timeline: List[str]            # Event log (real_life)
+    strategies: dict[str, D]       # LP fraction per user (partial_lp)
+    entry_prices: dict[str, D]     # Price when user entered (late)
+    timeline: list[str]            # Event log (real_life)
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -780,7 +760,7 @@ def create_model(
     *,
     vault_apy: Optional[D] = None,
     token_inflation_factor: Optional[D] = None,
-) -> Tuple[Vault, LP]:
+) -> tuple[Vault, LP]:
     """Create a (Vault, LP) pair for the given model codename.
 
     Optional overrides allow tests to vary parameters without monkeypatching globals.

@@ -12,7 +12,7 @@
 from decimal import Decimal as D
 from typing import Literal
 from ..core import create_model, model_label, User, K, ScenarioResult
-from ..formatter import Formatter, fmt
+from ..formatter import Formatter
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -165,19 +165,19 @@ def hold_scenario(codename: str, variant: HoldVariant, verbosity: int = 1) -> Sc
     return _hold_impl(codename, variant, verbosity)
 
 
-def hold_before_scenario(codename: str, verbosity: int = 1, verbose: bool = True) -> ScenarioResult:
+def hold_before_scenario(codename: str, verbosity: int = 1) -> ScenarioResult:
     """Passive holder buys BEFORE LPers."""
-    v = verbosity if verbose else 0
+    v = verbosity
     return _hold_impl(codename, "before", v)
 
 
-def hold_with_scenario(codename: str, verbosity: int = 1, verbose: bool = True) -> ScenarioResult:
+def hold_with_scenario(codename: str, verbosity: int = 1) -> ScenarioResult:
     """Passive holder buys WITH LPers."""
-    v = verbosity if verbose else 0
+    v = verbosity
     return _hold_impl(codename, "with", v)
 
 
-def hold_after_scenario(codename: str, verbosity: int = 1, verbose: bool = True) -> ScenarioResult:
+def hold_after_scenario(codename: str, verbosity: int = 1) -> ScenarioResult:
     """Passive holder buys AFTER LPers."""
-    v = verbosity if verbose else 0
+    v = verbosity
     return _hold_impl(codename, "after", v)

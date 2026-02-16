@@ -8,7 +8,7 @@ from decimal import Decimal as D
 from typing import Callable, List, Tuple
 
 from ..core import (
-    create_model, Vault, LP, User, CurveType, DUST, VAULT_APY,
+    create_model, User, CurveType, DUST,
     _exp_price, MAX_EXP_ARG, EXP_K,
 )
 

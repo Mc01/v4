@@ -11,7 +11,7 @@
 """
 from decimal import Decimal as D
 
-from ..core import create_model, User, DUST, CAP, _bisect_tokens_for_cost, _exp_integral
+from ..core import create_model, User, _bisect_tokens_for_cost, _exp_integral
 
 
 # ───────────────────────────────────────────────────────────────────────────

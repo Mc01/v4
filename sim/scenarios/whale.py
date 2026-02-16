@@ -13,7 +13,7 @@
 """
 from decimal import Decimal as D
 from ..core import create_model, model_label, User, ScenarioResult
-from ..formatter import Formatter, V, fmt
+from ..formatter import Formatter
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗

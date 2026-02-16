@@ -11,7 +11,7 @@
 """
 from decimal import Decimal as D
 
-from ..core import create_model, User, DUST
+from ..core import create_model, User
 
 
 # ───────────────────────────────────────────────────────────────────────────

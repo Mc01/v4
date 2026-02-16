@@ -11,7 +11,7 @@
 """
 from decimal import Decimal as D
 from ..core import create_model, model_label, User, K, ScenarioResult
-from ..formatter import Formatter, fmt
+from ..formatter import Formatter
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -33,10 +33,10 @@ COMPOUND_DAYS = 100
 # ║                         PUBLIC API                                        ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 
-def partial_lp_scenario(codename: str, verbosity: int = 1, verbose: bool = True) -> ScenarioResult:
+def partial_lp_scenario(codename: str, verbosity: int = 1) -> ScenarioResult:
     """Run partial LP strategy comparison scenario."""
     vault, lp = create_model(codename)
-    v = verbosity if verbose else 0
+    v = verbosity
     f = Formatter(v)
     f.set_lp(lp)
     
