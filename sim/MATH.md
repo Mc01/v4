@@ -155,7 +155,7 @@ Sell: base_return = integral(supply_after, supply_before)
       usdc_out = base_return * multiplier
 ```
 
-**Why this matters**: The multiplier changes between buy and sell as buy_usdc and vault balance shift. For nonlinear curves, `integral(a,b)/m1 * m2 != cost * (m2/m1)`. SYN avoids this because its integral is linear at saturation. EYN amplifies it exponentially. See [../.claude/math/FINDINGS.md](../.claude/math/FINDINGS.md) Root Cause #2.
+**Why this matters**: The multiplier changes between buy and sell as buy_usdc and vault balance shift. For nonlinear curves, `integral(a,b)/m1 * m2 != cost * (m2/m1)`. SYN avoids this because its integral is linear at saturation. EYN amplifies it exponentially. See [../.agent/math/FINDINGS.md](../.agent/math/FINDINGS.md) Root Cause #2.
 
 ---
 

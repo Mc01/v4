@@ -70,3 +70,14 @@ These guidelines define the standards for code quality, style, and philosophy fo
     - ALWAYS go back to the PLANNING phase.
     - Work with the user to explore, structure, and formalize a well-thought plan.
     - Do not just "patch" it on the fly.
+
+14. **Mandatory Review Workflow**
+    - All plans, code reviews, and summaries MUST be presented to the user for interactive review.
+    - **Environment-aware tooling**:
+        - **opencode** + Plannotator installed: Use Plannotator (`/submit-plan`, `/plannotator-review`, `/plannotator-annotate`).
+        - **Antigravity / Cursor IDE**: Use the built-in plan verification and review tools provided by the environment.
+    - **Plans**: Always verify the plan with the user at the beginning. Wait for explicit approval before proceeding.
+    - **Code reviews**: After each milestone, review code changes in detail with the user. Walk through what changed and why.
+    - **Summaries**: Always present summaries to the user at the end of work.
+    - **Confirmation required**: Always require explicit confirmation from the user before continuing. Do not assume approval — wait for a response.
+    - Never skip this step. Silent completion without review is not acceptable.

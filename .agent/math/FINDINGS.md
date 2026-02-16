@@ -6,11 +6,13 @@ The vault residual is **not a yield distribution problem — it is a bonding cur
 
 - The LP yield mechanism works correctly: after all LP removals, vault = buy_usdc exactly.
 - All vault yield (LP USDC yield + buy USDC yield) is properly distributed during `remove_liquidity()`.
-- The residual comes from the **sell phase**: bonding curve mechanics prevent full recovery of buy_usdc.
+- The residual came from the **sell phase**: bonding curve mechanics prevented full recovery of buy_usdc.
 - SYN has 0 residual because the sigmoid ceiling makes its integral linear at the operating point.
-- CYN had ~20k residual because `_update_k()` inflated k 5.79x during LP operations (resolved by FIX 1).
-- EYN has ~7k because the exponential curve amplifies small price multiplier changes.
-- LYN has ~33 because log growth is gentle, dampening the same multiplier asymmetry.
+- CYN had ~20k residual because `_update_k()` inflated k 5.79x during LP operations (✅ resolved by FIX 1).
+- EYN had ~7k because the exponential curve amplified small price multiplier changes (✅ resolved by FIX 4).
+- LYN had ~33 because log growth is gentle, dampening the same multiplier asymmetry (✅ resolved by FIX 4).
+
+**ALL models now have 0 residual across all scenarios.**
 
 For the raw data behind these findings, see [VALUES.md](./VALUES.md).
 For the fix plan, see [PLAN.md](./PLAN.md).
@@ -44,10 +46,11 @@ See [VALUES.md](./VALUES.md) whale scenario trace for the full step-by-step acco
 
 ---
 
-## Root Cause #2: EYN/LYN Price Multiplier Asymmetry
+## Root Cause #2: EYN/LYN Price Multiplier Asymmetry — RESOLVED by FIX 4
 
-**Impact**: 7,056 USDC (EYN), 33 USDC (LYN).
-**Location**: `core.py:489` (buy: `mult = _get_price_multiplier()`), `core.py:549` (sell: `raw_out = base_return * _get_price_multiplier()`).
+**Impact** (historical): 7,056 USDC (EYN), 33 USDC (LYN). **Now 0 across all scenarios.**
+**Location**: `core.py` — `_get_sell_multiplier()` (FIX 4) replaces `_get_price_multiplier()` for sell operations.
+**Status**: **RESOLVED** — `sell()` now uses principal-only multiplier, yield flows exclusively through `remove_liquidity()`.
 
 ### The Problem
 
@@ -66,6 +69,14 @@ For a general nonlinear integral: `integral(a, a+n) / m1 * m2 != cost * (m2/m1)`
 - **EXP**: Integral `(P0/k)(e^(kb) - e^(ka))` is dominated by `e^(kb)` at high supply. Small mult errors produce exponentially amplified USDC discrepancies.
 - **LOG**: Integral `P0*[(u*ln(u) - u)/k + x]` (where `u = 1+kx`) grows sublinearly. Same mult errors produce tiny discrepancies.
 - **SIG**: At ceiling saturation, integral ≈ `Pmax*(b-a)` (linear). Linear integrals satisfy `f(x/m)*m = x` exactly — zero asymmetry.
+
+### Solution: Principal-Only Sell Multiplier (FIX 4)
+
+Added `_get_sell_multiplier()` in `core.py` — returns `(buy_usdc + lp_usdc) / buy_usdc` (or `1` when `lp_impacts_price=False`). This is the principal-only ratio with no vault yield inflation.
+
+**Why it works**: Buy uses `amount / multiplier` to determine effective cost. Sell now uses `integral_return * sell_multiplier` where `sell_multiplier` equals the principal ratio (same as buy multiplier before any compounding). Since both operations scale by the same principal-based factor, the roundtrip is symmetric — no USDC leaks.
+
+**Yield channel**: Vault yield is now delivered exclusively through `remove_liquidity()`. Selling tokens returns only curve-based value. This creates a clean separation: **LP to earn yield, sell to exit position.**
 
 ---
 
@@ -113,7 +124,7 @@ Total received: `L*delta + B*(delta-1) + B = P*delta = V`. **Conservation: exact
 
 The LP removal phase conserves perfectly across all models — verified in the whale scenario (vault = 52,500 = buy_usdc after all 6 LP removals, with all 1,387 USDC of yield distributed).
 
-The sell phase is where curve-specific mechanics create residual. Each seller sees a price based on `effective_usdc`, but the vault's real balance constrains actual payouts. The fair share cap prevents over-extraction but leaves residual when the curve over-promises.
+In single-user scenarios, these cancel out perfectly (mathematically proven — see [math/FINDINGS.md](./math/FINDINGS.md)). In multi-user scenarios, the bonding curve must be symmetric for conservation to hold. After FIX 1 + FIX 4, **all four models achieve 0 residual across all scenarios**.
 
 ---
 
