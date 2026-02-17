@@ -101,11 +101,11 @@ sum(deposits) + vault_yield = sum(withdrawals) + vault_residual
 
 ---
 
-# Phase 5: Code Cleanup + New Features (NEXT)
+# Phase 5-10: Code Cleanup + New Features
 
 Sourced from [comprehensive code review](../../.gemini/antigravity/brain/d9b0b3ef-47ec-47bd-b5c4-2a195806b44a/review.md) (11 dimensions, 40+ findings, 40/55 score).
 
-## Phase 5A: Code Cleanup
+## Phase 5: Code Cleanup — DONE
 
 All items are non-behavioral (tests should still pass after each).
 
@@ -157,41 +157,9 @@ All items are non-behavioral (tests should still pass after each).
 
 ---
 
-## Phase 5B: FIX 4 Toggle
+## Phase 6: Architecture + Comments
 
-Make FIX 4 optional so protocol designers can compare behavior with and without.
-
-### Implementation
-- **`core.py`**: Add `SYMMETRIC_SELL = True` module-level flag
-- **`LP.__init__`**: Store `self.symmetric_sell = symmetric_sell` param
-- **`sell()`**: Use `_get_sell_multiplier()` when `self.symmetric_sell=True`, else `_get_price_multiplier()`
-- **`create_model()`**: Accept `symmetric_sell: bool = True` kwarg, pass to LP
-
-### CLI Integration
-- **`run_model.py`**: Add `--fix` / `--no-fix` argparse flags
-- `--fix` → `symmetric_sell=True` (FIX 4 active)
-- `--no-fix` → `symmetric_sell=False` (original behavior)
-- **`run_sim.sh`**: Default runs **without** FIX 4. `--fix` enables it.
-  - `./run_sim.sh` → original behavior (residuals visible)
-  - `./run_sim.sh --fix` → FIX 4 active (0 residuals)
-
-### Tokenomics Analysis
-- **New file**: `.agent/math/fix4_analysis.md`
-- Side-by-side comparison table: all scenarios × all models, with vs without FIX 4
-- Impact on: user profits, vault residuals, price paths, LP returns
-- Assessment of protocol design implications:
-  - With FIX 4: sell = pure curve, yield = LP-only → stronger LP incentive
-  - Without FIX 4: sell includes yield → curve asymmetry → residual
-
----
-
-## Phase 5C: Architecture + Comments
-
-### A2: Curve dispatch strategy (approved)
-- Store curve `integral` and `price` functions as callables on LP instance
-- Set in `__init__` based on `curve_type`
-- Eliminates 4× repeated `if/elif` dispatch
-- **Recommendation**: Composition pattern (lightest touch, no new classes)
+### A2: Curve dispatch strategy — DONE (completed in Phase 5 as DU1)
 
 ### A3: Move UserSnapshot (approved)
 - Move `UserSnapshot` inside `Vault` as `Vault.Snapshot`
@@ -208,7 +176,7 @@ Make FIX 4 optional so protocol designers can compare behavior with and without.
 
 ---
 
-## Phase 5D: Tests (TG1-TG7)
+## Phase 7: Tests (TG1-TG7)
 
 **Target**: ~28 new tests (7 tests × 4 models). Add to `test_coverage_gaps.py`.
 
@@ -224,7 +192,7 @@ Make FIX 4 optional so protocol designers can compare behavior with and without.
 
 ---
 
-## Phase 5E: New Features
+## Phase 8: New Features
 
 ### MF1: Quadratic bonding curve (`p = a * s²`)
 - Add `CurveType.QUADRATIC = "Q"`
@@ -253,7 +221,7 @@ Make FIX 4 optional so protocol designers can compare behavior with and without.
 
 ---
 
-## Phase 5F: Math Issues Report
+## Phase 9: Math Issues Report
 
 **Deliverable**: `.agent/math/math_analysis.md` — detailed report for specialist review.
 
