@@ -457,6 +457,7 @@ def test_bisect_precision(model: str):
         "EYN": _exp_integral,
         "SYN": _sig_integral,
         "LYN": _log_integral,
+        "P12YN": _poly_integral,
         "P15YN": _poly_integral,
         "P20YN": _poly_integral,
         "P25YN": _poly_integral,

@@ -135,11 +135,10 @@ MODELS: dict[str, ModelConfig] = {
 }
 
 # Polynomial exponent variants (active only, not auto-generated)
-# Each gets its own model code: P15=n^1.5, P20=n^2, P25=n^2.5
-for _code, _exp in [("P15", D("1.5")), ("P20", D(2)), ("P25", D("2.5"))]:
+for _code, _exp, _dep in [("P12", D("1.2"), False), ("P15", D("1.5"), False), ("P20", D(2), True), ("P25", D("2.5"), True)]:
     MODELS[f"{_code}YN"] = {
         "curve": CurveType.POLYNOMIAL, "yield_impacts_price": True,
-        "lp_impacts_price": False, "deprecated": False, "poly_exponent": _exp,
+        "lp_impacts_price": False, "deprecated": _dep, "poly_exponent": _exp,
     }
 
 ACTIVE_MODELS: list[str] = [code for code, cfg in MODELS.items() if not cfg["deprecated"]]

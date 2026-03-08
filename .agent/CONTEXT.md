@@ -3,7 +3,7 @@
 ## How to Run
 
 ```bash
-# Run comparison table (all 7 active models × all scenarios)
+# Run comparison table (all 5 active models × all scenarios)
 ./run_sim.sh
 
 # Run a specific model (all scenarios, verbose)
@@ -55,7 +55,7 @@ sim/
 |-----------|-------|-------------|
 | Exceptions | 17-24 | `ProtocolError`, `MintCapExceeded`, `NothingStaked` |
 | Constants & CurveConfig | 27-80 | CAP, EXPOSURE_FACTOR, VIRTUAL_LIMIT, VAULT_APY, `CurveConfig` dataclass, `EXP_CFG`/`SIG_CFG`/`LOG_CFG` |
-| Enums & Model registry | 86-151 | `CurveType`, `ModelConfig`, `MODELS` dict, `ACTIVE_MODELS` = CYN, EYN, SYN, LYN, P15YN, P20YN, P25YN |
+| Enums & Model registry | 86-151 | `CurveType`, `ModelConfig`, `MODELS` dict, `ACTIVE_MODELS` = CYN, EYN, SYN, LYN, P12YN, P15YN |
 | Core classes | 152-228 | `Color`, `User`, `CompoundingSnapshot`, `Vault` (with inner `Snapshot`) |
 | Curve integrals | 268-382 | `_exp_integral`, `_poly_integral`, `_log_integral`, `_bisect_tokens_for_cost` |
 | Curve dispatch | 388-400 | `_CURVE_DISPATCH` table mapping `CurveType` → `(integral_fn, spot_price_fn)` |
@@ -77,9 +77,9 @@ sim/
 
 ## Protocol State & Invariants
 
-**Current Status:** Validating 7 active models.
+**Current Status:** Validating 5 active models.
 
-1. **Zero Vault Residual Guarantee:** Across all 7 models and 10 scenarios, vault residual is **0 USDC**.
+1. **Zero Vault Residual Guarantee:** Across all 5 models and 10 scenarios, vault residual is **0 USDC**.
 2. **Symmetric Buy/Sell:** Sell operations use a principal-only multiplier `(buy_usdc + lp_usdc) / buy_usdc`. Yield does *not* inflate sell prices.
 3. **Yield Realization:** Users *must* `add_liquidity()` then `remove_liquidity()` to capture yield. Selling tokens directly forfeits vault yield.
 4. **Inflation Isolation:** Token inflation is decoupled via `TOKEN_INFLATION_FACTOR`.
@@ -89,7 +89,7 @@ sim/
 
 ## Test Suite Reference
 
-434 Total Tests traversing 7 models across 7 domains to guarantee mathematical fidelity:
+372 Total Tests traversing 5 models across 7 domains to guarantee mathematical fidelity:
 
 - `test_conservation`: System USDC strict conservation.
 - `test_invariants`: State tracking, sell proportions.

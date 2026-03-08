@@ -3,7 +3,7 @@
 ║            Commonwealth Protocol - Model Test Suite                       ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 
-Tests 7 active models (*YN) defined in MODELS.md:
+Tests 6 active models (*YN) defined in MODELS.md:
 - 5 curve types: Constant Product (C), Exponential (E), Sigmoid (S), Logarithmic (L), Polynomial (P)
 - 4 fixed invariants:
   - Token Inflation = always yes
@@ -12,10 +12,10 @@ Tests 7 active models (*YN) defined in MODELS.md:
   - LP -> Price = always no
 
 Usage:
-    python test_model.py                  # Compare 7 active *YN models
-    python test_model.py CYN              # Detailed scenarios for one model
-    python test_model.py CYN,EYN,SYN      # Compare specific models
-    python test_model.py --all            # Include archived models
+    ./run_sim.sh                  # Compare 6 active *YN models
+    ./run_sim.sh CYN              # Detailed scenarios for one model
+    ./run_sim.sh CYN,EYN,SYN      # Compare specific models
+    ./run_sim.sh --all            # Include archived models
     python test_model.py --multi CYN      # Multi-user scenario for one model
     python test_model.py --bank CYN       # Bank run scenario for one model
 """
@@ -228,22 +228,22 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python test_model.py                    # Compare 7 active *YN models (table view)
-  python test_model.py CYN                # All scenarios for one model (verbose)
-  python test_model.py CYN,EYN,SYN        # Compare specific models (table view)
-  python test_model.py --all              # Include all 16 models (incl. archived)
-  python test_model.py --single           # Single-user scenario for active models
-  python test_model.py --multi CYN        # Multi-user scenario for one model
-  python test_model.py --bank CYN,EYN     # Bank run scenario for specific models
-  python test_model.py --rmulti           # Reverse multi-user (last buyer exits first)
-  python test_model.py --rbank            # Reverse bank run (last buyer exits first)
-  python test_model.py --hold CYN         # Hold scenario (passive holder dilution)
-  python test_model.py --late CYN         # Late entrant scenario (first-mover advantage)
-  python test_model.py --partial CYN      # Partial LP scenario (mixed strategies)
-  python test_model.py --whale CYN        # Whale entry scenario (concentration/slippage)
-  python test_model.py --rwhale CYN       # Reverse whale (whale exits first)
-  python test_model.py --real CYN         # Real life scenario (continuous flow)
-  python test_model.py --stochastic CYN   # Stochastic scenario (random arrivals)
+  ./run_sim.sh                    # Compare 6 active *YN models (table view)
+  ./run_sim.sh CYN                # All scenarios for one model (verbose)
+  ./run_sim.sh CYN,EYN,SYN        # Compare specific models (table view)
+  ./run_sim.sh --all              # Include all 20 models (incl. archived)
+  ./run_sim.sh --single           # Single-user scenario for active models
+  ./run_sim.sh --multi CYN        # Multi-user scenario for one model
+  ./run_sim.sh --bank CYN,EYN     # Bank run scenario for specific models
+  ./run_sim.sh --rmulti           # Reverse multi-user (last buyer exits first)
+  ./run_sim.sh --rbank            # Reverse bank run (last buyer exits first)
+  ./run_sim.sh --hold CYN         # Hold scenario (passive holder dilution)
+  ./run_sim.sh --late CYN         # Late entrant scenario (first-mover advantage)
+  ./run_sim.sh --partial CYN      # Partial LP scenario (mixed strategies)
+  ./run_sim.sh --whale CYN        # Whale entry scenario (concentration/slippage)
+  ./run_sim.sh --rwhale CYN       # Reverse whale (whale exits first)
+  ./run_sim.sh --real CYN         # Real life scenario (continuous flow)
+  ./run_sim.sh --stochastic CYN   # Stochastic scenario (random arrivals)
 """
     )
     parser.add_argument(
@@ -352,8 +352,27 @@ Examples:
     v: int = args.verbose if args.verbose > 0 else 1
 
     # Show comparison table only when no specific flags and multiple models
-    if run_all and not verbose:
-        run_comparison(codes)
+    if run_all:
+        if not verbose:
+            run_comparison(codes)
+        else:
+            # Run all scenarios verbosely for the single model
+            for code in codes:
+                single_user_scenario(code, verbosity=v)
+                multi_user_scenario(code, verbosity=v)
+                bank_run_scenario(code, verbosity=v)
+                reverse_multi_user_scenario(code, verbosity=v)
+                reverse_bank_run_scenario(code, verbosity=v)
+                hold_before_scenario(code, verbosity=v)
+                hold_with_scenario(code, verbosity=v)
+                hold_after_scenario(code, verbosity=v)
+                late_90_scenario(code, verbosity=v)
+                late_180_scenario(code, verbosity=v)
+                partial_lp_scenario(code, verbosity=v)
+                whale_scenario(code, verbosity=v)
+                reverse_whale_scenario(code, verbosity=v)
+                real_life_scenario(code, verbosity=v)
+                stochastic_scenario(code, verbosity=v)
     
     # Run specific scenario if flags provided
     if args.single:

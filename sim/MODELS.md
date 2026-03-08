@@ -38,9 +38,8 @@ These properties are the same across all active models:
 | **EYN** | Exponential | — | Yes | No |
 | **SYN** | Sigmoid | — | Yes | No |
 | **LYN** | Logarithmic | — | Yes | No |
+| **P12YN** | Polynomial | 1.2 | Yes | No |
 | **P15YN** | Polynomial | 1.5 | Yes | No |
-| **P20YN** | Polynomial | 2.0 | Yes | No |
-| **P25YN** | Polynomial | 2.5 | Yes | No |
 
 ### Codename Convention
 
@@ -48,7 +47,7 @@ These properties are the same across all active models:
 
 - **C** = Constant Product, **E** = Exponential, **S** = Sigmoid, **L** = Logarithmic, **P** = Polynomial
 - **Y** = Yes, **N** = No
-- Polynomial variants use numeric suffix for exponent: **P15** = n^1.5, **P20** = n^2, **P25** = n^2.5
+- Polynomial variants use numeric suffix for exponent: **P12** = n^1.2, **P15** = n^1.5
 
 ---
 
@@ -70,6 +69,8 @@ The following 12 models have been explored and archived. They remain available i
 | LYY | Logarithmic | Yes | Yes | LP moves price |
 | LNY | Logarithmic | No | Yes | LP moves price, no passive appreciation |
 | LNN | Logarithmic | No | No | No passive appreciation |
+| P20YN | Polynomial (2.0) | Yes | No | Steep exit penalty. Disadvantages late users |
+| P25YN | Polynomial (2.5) | Yes | No | Steepest exit penalty. Heavily favors early users |
 
 
 ---
