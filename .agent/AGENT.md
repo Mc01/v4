@@ -1,0 +1,53 @@
+# Commonwealth Protocol — Agent Orientation
+
+Commonwealth is a yield-bearing LP token protocol. Users buy tokens with USDC, provide liquidity, and earn yield from vault rehypothecation (5% APY). All vault yield is shared proportionally among liquidity providers — including yield from non-LPing users' USDC. This "common yield" is the core value proposition. We are validating the math in Python before writing Solidity.
+
+**Start here, then read [CONTEXT.md](./CONTEXT.md) for operational details.**
+
+---
+
+## Reading Order
+
+| # | File | When to read | What you learn |
+|---|------|-------------|----------------|
+| 1 | **[CONTEXT.md](./CONTEXT.md)** | Always | How to run, code locations, current problems, file map |
+| 2 | **[MISSION.md](./MISSION.md)** | For design decisions | Value proposition, yield design, why buy_usdc_yield to LPs is intentional |
+| 3 | **[math/VALUES.md](./math/VALUES.md)** | For reference data | Current scenario results, comparison table, key observations |
+| 4 | **[../sim/MATH.md](../sim/MATH.md)** | For protocol math | All formulas, curve integrals, price multiplier mechanism |
+| 5 | **[../sim/MODELS.md](../sim/MODELS.md)** | For model matrix | Codename convention, archived models, tradeoffs |
+| 6 | **[../sim/TEST.md](../sim/TEST.md)** | For test env specifics | Virtual reserves, exposure factor, test-only mechanics |
+| 7 | **[GUIDELINES.md](./GUIDELINES.md)** | For coding standards | Code style, principles, testing philosophy |
+| 8 | **[workflows/ULTRAWORK.md](./workflows/ULTRAWORK.md)** | When user says "ultrawork" | Maximum precision mode — certainty protocol, zero-compromise delivery |
+| 9 | **[FINDINGS.md](./FINDINGS.md)** | For planned refactoring | Detailed Python code cleanup and architectural modularity plan (Phase 10+) |
+
+---
+
+## Glossary
+
+| Term | Definition |
+|------|-----------|
+| **Commonwealth** | Internal name for this protocol |
+| **Bonding Curve** | Pricing function: determines token price from supply/reserves |
+| **Vault** | External yield protocol (Spark/Sky/Aave) where all USDC earns 5% APY |
+| **Rehypothecation** | Deploying user-deposited USDC into yield vaults |
+| **LP** | Liquidity Provider — deposits tokens + USDC pair to earn yield |
+| **Minting/Burning** | Creating/destroying tokens on buy/sell |
+| **Token Inflation** | Minting new tokens for LPs at configurable APY |
+| **Common Yield** | All vault yield shared among LPs — the core value proposition |
+| **buy_usdc** | Aggregate USDC from token purchases (feeds into price) |
+| **lp_usdc** | Aggregate USDC from LP deposits (does NOT feed into price in active models) |
+| **effective_usdc** | `buy_usdc * (vault_balance / total_principal)` — yield-adjusted pricing input |
+| **Price Multiplier** | `effective_usdc / buy_usdc` — how yield scales integral curve prices |
+| **Fair Share Cap** | Limits withdrawals to proportional vault share (prevents bank runs) |
+| **CYN/EYN/SYN/LYN** | Active models: [C]onstant/[E]xp/[S]igmoid/[L]og + [Y]ield->Price + [N]o LP->Price |
+| **P12YN/P15YN** | Polynomial variants: exponent n=1.2/1.5 + [Y]ield->Price + [N]o LP->Price |
+
+---
+
+## Working Rules
+
+1. **This is a testbed.** Validate math first. Get the math right before Solidity.
+2. **Keep it simple.** Complexity should come from economic mechanics, not scaffolding.
+3. **Track what matters.** Every model reports: total yield, yield per user, profit/loss per user, vault residual.
+4. **Dual goal.** Attractive to users (everyone earns) AND sustainable for the protocol.
+5. **Common good.** Models that structurally disadvantage late entrants must be identified and avoided.

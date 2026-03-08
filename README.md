@@ -56,15 +56,43 @@ flowchart LR
 
 ## This Is a Testfield
 
-The `math/` directory contains Python models that simulate the protocol under various configurations. The purpose is to **validate math and choose the correct model** before writing Solidity contracts.
+The `sim/` directory contains Python models that simulate the protocol under various configurations. The purpose is to **validate math and choose the correct model** before writing Solidity contracts.
 
-Each model is defined by a combination of building blocks:
-- **Bonding Curve Type** – how buy/sell price is calculated
-- **Yield Impacts Price** – whether vault yield grows token price
-- **Token Inflation** – LPs receive minted tokens as yield
-- **LP Impacts Price** – whether adding/removing liquidity moves price
+After extensive testing, **P12YN (Polynomial n=1.2)** has been selected as "the one" chosen model for the Commonwealth protocol. It provides the most elegant and balanced growth curve while remaining sustainable.
 
-See [MODELS.md](math/MODELS.md) for the full model matrix and [CURVES.md](math/CURVES.md) for bonding curve analysis.
+Other models remain in the codebase strictly for metrics reference, performance comparison, and testing.
+
+Each model is defined by its **bonding curve type**:
+- **Constant Product** (CYN), **Exponential** (EYN), **Sigmoid** (SYN), **Logarithmic** (LYN), **Polynomial** (P12YN, P15YN)
+
+Fixed invariants across all models:
+- **Yield → Price = Yes** — vault compounding grows token price
+- **LP → Price = No** — adding/removing liquidity is price-neutral
+- **Token Inflation = Yes** — LPs receive minted tokens as yield
+
+See [MODELS.md](sim/MODELS.md) for the full model matrix and [MATH.md](sim/MATH.md) for bonding curve formulas and analysis.
+
+---
+
+## How to Run
+
+```bash
+# Run the chosen model (P12YN) explicitly or implicitly
+./run_sim.sh
+./run_sim.sh P12YN
+
+# Run comparison table with all active models
+./run_sim.sh --active
+
+# Run specific scenario for the chosen model
+./run_sim.sh --whale CYN
+./run_sim.sh --bank
+./run_sim.sh --rwhale           # Reverse whale (whale exits first)
+./run_sim.sh --stochastic       # Stochastic arrivals (seeded RNG)
+
+# Run full test suite (434 tests, 7 modules)
+python3 -m sim.test.run_all
+```
 
 ---
 

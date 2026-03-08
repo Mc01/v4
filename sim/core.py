@@ -1,0 +1,851 @@
+"""
+Commonwealth Protocol - Core Infrastructure
+
+Contains all core classes, constants, and utilities used by run_model.py and scenarios.
+"""
+from decimal import Decimal as D
+from typing import Callable, Optional, TypedDict
+from dataclasses import dataclass
+from enum import Enum
+from itertools import product as _product
+
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                             EXCEPTIONS                                    ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+class ProtocolError(Exception):
+    """Base exception for all protocol-level errors."""
+
+class MintCapExceeded(ProtocolError):
+    """Raised when minting would exceed the token supply cap."""
+
+class NothingStaked(ProtocolError):
+    """Raised when attempting to remove from an empty vault."""
+
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                              CONSTANTS                                    ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+K = D(1_000)
+B = D(1_000_000_000)
+
+# Test environment bounds (see TEST.md)
+EXPOSURE_FACTOR = 100 * K
+CAP = 1 * B                # Maximum token supply
+VIRTUAL_LIMIT = 100 * K    # Threshold where virtual liquidity tapers to zero
+
+# Dust threshold: residuals below this from accumulated rounding are treated as zero
+DUST = D("1E-12")
+
+# Vault yield
+VAULT_APY = D(5) / D(100)
+
+# Token inflation for LPs: scales how much of vault APY is mirrored as token minting.
+# 1.0 = same as vault APY (default), 0.0 = no token inflation.
+TOKEN_INFLATION_FACTOR = D(1)
+
+@dataclass(frozen=True)
+class CurveConfig:
+    """Immutable curve parameters. One instance per curve type."""
+    base_price: D
+    k: D
+    max_price: D = D(0)    # Only used by sigmoid
+    midpoint: D = D(0)     # Only used by sigmoid
+    exponent: D = D(2)     # Only used by polynomial (default = quadratic)
+
+# Calibrated for ~500 USDC test buys
+EXP_CFG = CurveConfig(base_price=D(1), k=D("0.0002"))          # → ~477 tokens
+SIG_CFG = CurveConfig(base_price=D(1), k=D("0.001"),
+                      max_price=D(2), midpoint=D(0))            # → ~450 tokens
+LOG_CFG = CurveConfig(base_price=D(1), k=D("0.01"))            # → ~510 tokens
+
+# Backward-compatible aliases (used by curve functions and external imports)
+EXP_BASE_PRICE, EXP_K = EXP_CFG.base_price, EXP_CFG.k
+SIG_MAX_PRICE, SIG_K, SIG_MIDPOINT = SIG_CFG.max_price, SIG_CFG.k, SIG_CFG.midpoint
+LOG_BASE_PRICE, LOG_K = LOG_CFG.base_price, LOG_CFG.k
+
+# ┌───────────────────────────────────────────────────────────────────────────┐
+# │ Testing & Debugging Configuration                                         │
+# └───────────────────────────────────────────────────────────────────────────┘
+
+# Strict mode: enable accounting assertions (performance overhead)
+STRICT_MODE = False
+
+# Disable virtual liquidity for isolation testing
+DISABLE_VIRTUAL_LIQUIDITY = False
+
+# Polynomial: p(s) = base_price * k * s^n  (n=exponent, default=2 for quadratic)
+POLY_CFG = CurveConfig(base_price=D(1), k=D("0.000001"), exponent=D(2))
+POLY_BASE_PRICE = POLY_CFG.base_price
+POLY_K = POLY_CFG.k
+POLY_EXPONENT = POLY_CFG.exponent
+
+# Binary search precision for integral curves
+BISECT_ITERATIONS = 200
+
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                         ENUMS & MODEL REGISTRY                            ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+class CurveType(Enum):
+    CONSTANT_PRODUCT = "C"
+    EXPONENTIAL = "E"
+    SIGMOID = "S"
+    LOGARITHMIC = "L"
+    POLYNOMIAL = "P"
+
+CURVE_NAMES: dict[CurveType, str] = {
+    CurveType.CONSTANT_PRODUCT: "Constant Product",
+    CurveType.EXPONENTIAL: "Exponential",
+    CurveType.SIGMOID: "Sigmoid",
+    CurveType.LOGARITHMIC: "Logarithmic",
+    CurveType.POLYNOMIAL: "Polynomial",
+}
+
+
+class ModelConfig(TypedDict, total=False):
+    curve: CurveType
+    yield_impacts_price: bool
+    lp_impacts_price: bool
+    deprecated: bool
+    poly_exponent: D  # Only for CurveType.POLYNOMIAL
+
+# ┌───────────────────────────────────────────────────────────────────────────┐
+# │ Auto-generate 16 combinations (4 base curves x 2 yield x 2 LP flags)  │
+# │ Active: *YN. Archived: *YY, *NY, *NN.                                 │
+# │ Polynomial variants added manually below (3 exponents).               │
+# └───────────────────────────────────────────────────────────────────────────┘
+
+MODELS: dict[str, ModelConfig] = {
+    f"{cc}{yc}{lc}": {
+        "curve": ct,
+        "yield_impacts_price": yp,
+        "lp_impacts_price": lp,
+        "deprecated": not (yp and not lp),
+    }
+    for (cc, ct), (yc, yp), (lc, lp) in _product(
+        [("C", CurveType.CONSTANT_PRODUCT), ("E", CurveType.EXPONENTIAL),
+         ("S", CurveType.SIGMOID), ("L", CurveType.LOGARITHMIC)],
+        [("Y", True), ("N", False)],
+        [("Y", True), ("N", False)],
+    )
+}
+
+# Polynomial exponent variants (active only, not auto-generated)
+for _code, _exp, _dep in [("P12", D("1.2"), False), ("P15", D("1.5"), False), ("P20", D(2), True), ("P25", D("2.5"), True)]:
+    MODELS[f"{_code}YN"] = {
+        "curve": CurveType.POLYNOMIAL, "yield_impacts_price": True,
+        "lp_impacts_price": False, "deprecated": _dep, "poly_exponent": _exp,
+    }
+
+ACTIVE_MODELS: list[str] = [code for code, cfg in MODELS.items() if not cfg["deprecated"]]
+
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                             ANSI COLORS                                   ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+class Color:
+    """ANSI color codes for terminal output. Single source of truth — import from here."""
+    HEADER = '\033[95m'
+    MAGENTA = '\033[95m'   # alias for HEADER (used by formatter)
+    PURPLE = '\033[35m'
+    BLUE = '\033[94m'
+    CYAN = '\033[96m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+    DIM = '\033[2m'
+    STATS = '\033[90m'
+    END = '\033[0m'
+
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                             CORE CLASSES                                  ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# ┌─────────────────────────────────────┐
+# │              User                   │
+# └─────────────────────────────────────┘
+
+class User:
+    """Simple wallet: holds USDC and token balances."""
+    def __init__(self, name: str, usd: D = D(0), token: D = D(0)):
+        self.name = name
+        self.balance_usd = usd
+        self.balance_token = token
+
+
+# ┌─────────────────────────────────────┐
+# │       CompoundingSnapshot           │
+# └─────────────────────────────────────┘
+
+@dataclass(frozen=True)
+class CompoundingSnapshot:
+    """Captures vault value at a specific compounding index for delta calculations."""
+    value: D
+    index: D
+
+
+# ┌─────────────────────────────────────┐
+# │              Vault                  │
+# └─────────────────────────────────────┘
+
+class Vault:
+    """USDC vault with daily APY-based compounding.
+
+    Tracks deposited USDC and grows it via a compounding index.
+    Snapshots allow computing accrued yield between any two points in time.
+    """
+    def __init__(self, apy: D = VAULT_APY):
+        self.apy: D = apy
+        self.compounding_index: D = D(1)
+        self.snapshot: Optional[CompoundingSnapshot] = None
+        self.compounds: int = 0
+
+    def balance_of(self) -> D:
+        """Current vault value, scaled by compounding growth since last snapshot."""
+        if self.snapshot is None:
+            return D(0)
+        return self.snapshot.value * (self.compounding_index / self.snapshot.index)
+
+    def add(self, value: D):
+        self.snapshot = CompoundingSnapshot(value + self.balance_of(), self.compounding_index)
+
+    def remove(self, value: D):
+        if self.snapshot is None:
+            raise NothingStaked("Nothing staked!")
+        self.snapshot = CompoundingSnapshot(self.balance_of() - value, self.compounding_index)
+
+    def compound(self, days: int):
+        """Advance the compounding index by N days of daily APY accrual.
+
+        Note: O(days) loop — each day multiplied individually to match
+        discrete daily compounding. For Solidity translation, consider
+        using exponentiation: index *= (1 + apy/365) ** days.
+        """
+        for _ in range(days):
+            self.compounding_index *= D(1) + (self.apy / D(365))
+        self.compounds += days
+
+
+# ┌─────────────────────────────────────┐
+# │          Snapshot               │
+# └─────────────────────────────────────┘
+
+    @dataclass(frozen=True)
+    class Snapshot:
+        """Records the compounding index when a user adds liquidity (for yield delta)."""
+        index: D
+
+
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                       INTEGRAL CURVE MATH                                 ║
+# ║                    (Decimal-based for precision)                          ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+#
+# Each curve defines:
+#   - price(supply): spot price at a given supply level
+#   - integral(a, b): total cost to move supply from a to b
+#
+# These are used by LP.buy/sell to compute token amounts for a given USDC cost.
+
+# Maximum exponent argument to prevent overflow (Decimal can handle more than float)
+MAX_EXP_ARG = D(700)
+
+
+# ┌─────────────────────────────────────┐
+# │      Exponential Curve              │
+# └─────────────────────────────────────┘
+
+def _exp_integral(a: D, b: D) -> D:
+    """Integral of base * e^(k*x) from a to b.
+
+    Note: For very negative exp_a_arg, exp() gracefully underflows to ~0
+    in Python's Decimal. This is correct — the integral from -∞ is finite.
+    """
+    exp_b_arg = EXP_K * b
+    exp_a_arg = EXP_K * a
+    
+    if exp_b_arg > MAX_EXP_ARG:
+        return D('Inf')
+    
+    return (EXP_BASE_PRICE / EXP_K) * (exp_b_arg.exp() - exp_a_arg.exp())
+
+def _exp_price(s: D) -> D:
+    if EXP_K * s > MAX_EXP_ARG:
+        return D('Inf')
+    return EXP_BASE_PRICE * (EXP_K * s).exp()
+
+
+# ┌─────────────────────────────────────┐
+# │         Sigmoid Curve               │
+# └─────────────────────────────────────┘
+
+def _sig_integral(a: D, b: D) -> D:
+    """Integral of max_p / (1 + e^(-k*(x-m))) from a to b."""
+    def F(x: D) -> D:
+        arg = SIG_K * (x - SIG_MIDPOINT)
+        if arg > MAX_EXP_ARG:
+            # For large arg, ln(1+e^x) ≈ x (linear). Avoids Decimal overflow.
+            return (SIG_MAX_PRICE / SIG_K) * arg
+        return (SIG_MAX_PRICE / SIG_K) * (D(1) + arg.exp()).ln()
+    return F(b) - F(a)
+
+def _sig_price(s: D) -> D:
+    return SIG_MAX_PRICE / (D(1) + (-SIG_K * (s - SIG_MIDPOINT)).exp())
+
+
+# ┌─────────────────────────────────────┐
+# │       Logarithmic Curve             │
+# └─────────────────────────────────────┘
+
+def _log_integral(a: D, b: D) -> D:
+    """Integral of base * (1 + ln(1 + k*x)) from a to b."""
+    def F(x: D) -> D:
+        u = D(1) + LOG_K * x
+        if u <= 0:
+            return D(0)
+        return LOG_BASE_PRICE * ((u * u.ln() - u) / LOG_K + x)
+    return F(b) - F(a)
+
+def _log_price(s: D) -> D:
+    """Logarithmic spot price: P₀·(1 + ln(1 + k·s)).
+
+    Starts at P₀ = 1.0 at s=0, grows logarithmically. The +1 offset
+    ensures p(0) = base_price, consistent with the integral function."""
+    val = D(1) + LOG_K * s
+    return LOG_BASE_PRICE * (D(1) + val.ln()) if val > 0 else D(0)
+
+
+# ┌─────────────────────────────────────┐
+# │       Polynomial Curve              │
+# └─────────────────────────────────────┘
+
+def _poly_integral(a: D, b: D, *, exponent: D = POLY_EXPONENT) -> D:
+    """Integral of base_price * (1 + k * x^n) from a to b.
+
+    = base_price * (b - a) + base_price * k * (b^(n+1) - a^(n+1)) / (n+1)
+
+    Guards: For fractional exponents (e.g., 1.5, 2.5), Decimal raises
+    InvalidOperation on negative bases. Floor to 0 if supply goes negative.
+    """
+    n1 = exponent + D(1)
+    # Fractional exponents cannot handle negative bases in Decimal
+    a_clamped = max(a, D(0))
+    b_clamped = max(b, D(0))
+    base_cost = POLY_BASE_PRICE * (b_clamped - a_clamped)
+    curve_cost = POLY_BASE_PRICE * POLY_K * (b_clamped ** n1 - a_clamped ** n1) / n1
+    return base_cost + curve_cost
+
+def _poly_price(s: D, *, exponent: D = POLY_EXPONENT) -> D:
+    """Polynomial spot price: base_price * (1 + k * s^n).
+
+    Starts at base_price at s=0, grows as power law + offset.
+    """
+    if s <= D(0):
+        return POLY_BASE_PRICE
+    return POLY_BASE_PRICE * (D(1) + POLY_K * s ** exponent)
+
+
+# ┌─────────────────────────────────────┐
+# │     Binary Search for Tokens        │
+# └─────────────────────────────────────┘
+
+def _bisect_tokens_for_cost(supply: D, cost: D, integral_fn: Callable[[D, D], D], max_tokens: D = D("1e9")) -> D:
+    """Binary search: find n tokens where integral(supply, supply+n) = cost."""
+    if cost <= 0:
+        return D(0)
+    lo, hi = D(0), min(max_tokens, D("1e8"))
+    while integral_fn(supply, supply + hi) < cost and hi < max_tokens:
+        hi *= 2
+    for _ in range(BISECT_ITERATIONS):
+        mid = (lo + hi) / 2
+        mid_cost = integral_fn(supply, supply + mid)
+        if mid_cost < cost:
+            lo = mid
+        else:
+            hi = mid
+        # Early exit if converged to desired precision
+        if abs(mid_cost - cost) < DUST:
+            break
+    return (lo + hi) / 2
+
+
+# ┌─────────────────────────────────────┐
+# │      Curve Dispatch Table           │
+# └─────────────────────────────────────┘
+
+# Maps integral curve types to their (integral, spot_price) callables.
+# CP is excluded — it uses virtual reserves, not integrals.
+_CURVE_DISPATCH: dict[CurveType, tuple[Callable[[D, D], D], Callable[[D], D]]] = {
+    CurveType.EXPONENTIAL:  (_exp_integral, _exp_price),
+    CurveType.SIGMOID:      (_sig_integral, _sig_price),
+    CurveType.LOGARITHMIC:  (_log_integral, _log_price),
+    CurveType.POLYNOMIAL:   (_poly_integral, _poly_price),
+}
+
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                          LIQUIDITY POOL (LP)                              ║
+# ╠═══════════════════════════════════════════════════════════════════════════╣
+# ║ Parameterized by two model dimensions:                                    ║
+# ║   - yield_impacts_price: vault compounding growth feeds back into price   ║
+# ║   - lp_impacts_price: LP deposits contribute to effective USDC for pricing║
+# ║                                                                           ║
+# ║ Supports 5 bonding curve types. Constant Product uses virtual reserves;   ║
+# ║ Exponential/Sigmoid/Logarithmic/Polynomial use integral math + multiplier.║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+class LP:
+    def __init__(self, vault: Vault, curve_type: CurveType,
+                 yield_impacts_price: bool, lp_impacts_price: bool,
+                 token_inflation_factor: D = TOKEN_INFLATION_FACTOR,
+                 poly_exponent: Optional[D] = None):
+        self.vault = vault
+        self.curve_type = curve_type
+        self.yield_impacts_price = yield_impacts_price
+        self.lp_impacts_price = lp_impacts_price
+        self.token_inflation_factor = token_inflation_factor
+        self.poly_exponent = poly_exponent if poly_exponent is not None else POLY_EXPONENT
+
+        # Pool balances
+        self.balance_usd = D(0)
+        self.balance_token = D(0)
+        self.minted = D(0)
+
+        # Per-user LP positions and buy tracking
+        self.liquidity_token: dict[str, D] = {}
+        self.liquidity_usd: dict[str, D] = {}
+        self.user_buy_usdc: dict[str, D] = {}
+        self.user_snapshot: dict[str, Vault.Snapshot] = {}
+
+        # Aggregate USDC tracking — the split is the core of model dimensions:
+        # - buy_usdc: always contributes to effective_usdc (price base)
+        # - lp_usdc: only contributes to price if lp_impacts_price=True
+        # Both compound together in the vault. Yield scales via compound_ratio.
+        self.buy_usdc = D(0)
+        self.lp_usdc = D(0)
+
+        # Constant product invariant
+        self.k: Optional[D] = None
+
+        # Curve dispatch: integral and spot price callables (None for CP)
+        _dispatch = _CURVE_DISPATCH.get(self.curve_type)
+        if self.curve_type == CurveType.POLYNOMIAL:
+            # Polynomial: create bound functions with instance-specific exponent
+            exp = self.poly_exponent
+            def _bound_integral(a: D, b: D) -> D:
+                return _poly_integral(a, b, exponent=exp)
+            def _bound_spot(s: D) -> D:
+                return _poly_price(s, exponent=exp)
+            self._integral: Optional[Callable[[D, D], D]] = _bound_integral
+            self._spot_price: Optional[Callable[[D], D]] = _bound_spot
+        elif _dispatch:
+            self._integral = _dispatch[0]
+            self._spot_price = _dispatch[1]
+        else:
+            self._integral = None
+            self._spot_price = None
+
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │                   Dimension-Aware Pricing                             │
+    # └───────────────────────────────────────────────────────────────────────┘
+
+    def _get_effective_usdc(self) -> D:
+        """USDC amount used for price calculation, respecting yield/LP dimensions.
+
+        Base is always buy_usdc. LP deposits add to it if lp_impacts_price.
+        Yield compounds scale the total if yield_impacts_price.
+        """
+        base = self.buy_usdc
+        if self.lp_impacts_price:
+            base += self.lp_usdc
+
+        if self.yield_impacts_price:
+            total_principal = self.buy_usdc + self.lp_usdc
+            if total_principal > 0:
+                compound_ratio = self.vault.balance_of() / total_principal
+                return base * compound_ratio
+
+        return base
+
+    def _get_price_multiplier(self) -> D:
+        """Scaling factor for integral curve buys: effective_usdc / buy_usdc.
+        
+        Includes yield inflation when yield_impacts_price=True.
+        Used for buy pricing — more expensive tokens when vault has compounded.
+        """
+        if self.buy_usdc == 0:
+            return D(1)
+        return self._get_effective_usdc() / self.buy_usdc
+
+    def _get_sell_multiplier(self) -> D:
+        """Scaling factor for integral curve sells: principal-only, no yield.
+
+        FIX 4: Sell returns are based on principal USDC only, not
+        yield-inflated vault. This ensures sell is symmetric with buy
+        (both scale by the same principal ratio) and yield flows
+        exclusively through remove_liquidity.
+        """
+        if self.buy_usdc == 0:
+            return D(1)
+        base = self.buy_usdc
+        if self.lp_impacts_price:
+            base += self.lp_usdc
+        return base / self.buy_usdc
+
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │               Constant Product Virtual Reserves                       │
+    # └───────────────────────────────────────────────────────────────────────┘
+
+    def get_exposure(self) -> D:
+        """How much of the supply is exposed to price impact."""
+        # D(1000) scaling: at ~1M minted tokens, exposure reaches 0 and the
+        # curve flattens. Makes small test buys (500 USDC) produce visible
+        # price movement against a 1B token cap.
+        effective = min(self.minted * D(1000), CAP)
+        exposure = EXPOSURE_FACTOR * (D(1) - effective / CAP)
+        return max(D(0), exposure)
+
+    def get_virtual_liquidity(self) -> D:
+        """Virtual USDC liquidity that tapers off as buy_usdc approaches VIRTUAL_LIMIT.
+
+        Prevents extreme price swings on early, low-liquidity trades.
+        """
+        # Allow disabling for isolation testing
+        if DISABLE_VIRTUAL_LIQUIDITY:
+            return D(0)
+        
+        base = CAP / EXPOSURE_FACTOR
+        effective = min(self.buy_usdc, VIRTUAL_LIMIT)
+        liquidity = base * (D(1) - effective / VIRTUAL_LIMIT)
+        
+        return max(D(0), liquidity)
+
+    def _get_token_reserve(self) -> D:
+        """Available tokens for CP curve: (CAP - minted) / exposure_factor."""
+        exposure = self.get_exposure()
+        return (CAP - self.minted) / exposure if exposure > 0 else CAP - self.minted
+
+    def _get_usdc_reserve(self) -> D:
+        """USDC side of CP curve: effective_usdc + virtual_liquidity."""
+        return self._get_effective_usdc() + self.get_virtual_liquidity()
+
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │                            Price                                      │
+    # └───────────────────────────────────────────────────────────────────────┘
+
+    @property
+    def price(self) -> D:
+        """Current spot price. CP: reserve ratio. Integral curves: base_price * multiplier."""
+        if self.curve_type == CurveType.CONSTANT_PRODUCT:
+            token_reserve = self._get_token_reserve()
+            usdc_reserve = self._get_usdc_reserve()
+            if token_reserve == 0:
+                return D(1)  # Fallback: no tokens available, default to base price
+            return usdc_reserve / token_reserve
+        else:
+            assert self._spot_price is not None
+            return self._spot_price(self.minted) * self._get_price_multiplier()
+
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │         Fair Share: Caps Withdrawals to Prevent Vault Drain           │
+    # └───────────────────────────────────────────────────────────────────────┘
+
+    def _apply_fair_share_cap(self, requested: D, user_fraction: D) -> D:
+        """Hard cap on a single withdrawal to user's proportional vault share."""
+        vault_available = self.vault.balance_of()
+        fair_share = user_fraction * vault_available
+        return min(requested, fair_share, vault_available)
+
+    def _get_fair_share_scaling(self, requested_total_usdc: D, user_principal: D, total_principal: D) -> D:
+        """Scaling factor (0-1) to proportionally reduce all LP withdrawal components.
+        Returns min(1, fair_share/requested, vault/requested)."""
+        vault_available = self.vault.balance_of()
+        if total_principal > 0 and requested_total_usdc > 0:
+            fraction = user_principal / total_principal
+            fair_share = fraction * vault_available
+            return min(D(1), fair_share / requested_total_usdc, vault_available / requested_total_usdc)
+        elif requested_total_usdc > 0:
+            return min(D(1), vault_available / requested_total_usdc)
+        return D(1)
+
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │                       Core Operations                                 │
+    # └───────────────────────────────────────────────────────────────────────┘
+
+    def mint(self, amount: D):
+        """Mint new tokens into pool. Reverts if would exceed CAP."""
+        if self.minted + amount > CAP:
+            raise MintCapExceeded("Cannot mint over cap")
+        self.balance_token += amount
+        self.minted += amount
+
+    def rehypo(self):
+        """Sweep pool USDC into the vault for yield."""
+        self.vault.add(self.balance_usd)
+        self.balance_usd = D(0)
+
+    def dehypo(self, amount: D):
+        """Pull USDC back from vault into the pool."""
+        self.vault.remove(amount)
+        self.balance_usd += amount
+
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │                              BUY                                      │
+    # └───────────────────────────────────────────────────────────────────────┘
+
+    def buy(self, user: User, amount: D):
+        """User spends USDC to receive tokens. Curve determines token output."""
+        user.balance_usd -= amount
+        self.balance_usd += amount
+
+        if self.curve_type == CurveType.CONSTANT_PRODUCT:
+            if self.k is None:
+                self.k = self._get_token_reserve() * self._get_usdc_reserve()
+            assert self.k is not None  # type narrowing for pyright
+            token_reserve = self._get_token_reserve()
+            usdc_reserve = self._get_usdc_reserve()
+            new_usdc = usdc_reserve + amount
+            new_token = self.k / new_usdc
+            out_amount = token_reserve - new_token
+        else:
+            mult = self._get_price_multiplier()
+            effective_cost = amount / mult if mult > 0 else amount
+            assert self._integral is not None
+            out_amount = _bisect_tokens_for_cost(self.minted, effective_cost, self._integral)
+
+        self.mint(out_amount)
+        self.balance_token -= out_amount
+        user.balance_token += out_amount
+        self.buy_usdc += amount
+        self.user_buy_usdc[user.name] = self.user_buy_usdc.get(user.name, D(0)) + amount
+        self.rehypo()
+
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │                             SELL                                      │
+    # └───────────────────────────────────────────────────────────────────────┘
+
+    def sell(self, user: User, amount: D):
+        """User returns tokens for USDC. Fair share cap prevents vault drain."""
+
+        # Track principal fraction being sold (for buy_usdc bookkeeping)
+        if self.minted > 0:
+            principal_fraction = amount / self.minted
+            principal_portion = self.buy_usdc * principal_fraction
+        else:
+            principal_portion = D(0)
+
+        user_principal_reduction = min(
+            self.user_buy_usdc.get(user.name, D(0)), principal_portion)
+
+        user.balance_token -= amount
+
+        # Compute raw USDC output from the bonding curve
+        if self.curve_type == CurveType.CONSTANT_PRODUCT:
+            if self.k is None:
+                self.k = self._get_token_reserve() * self._get_usdc_reserve()
+            assert self.k is not None  # type narrowing for pyright
+            token_reserve = self._get_token_reserve()
+            usdc_reserve = self._get_usdc_reserve()
+            new_token = token_reserve + amount
+            new_usdc = self.k / new_token
+            # CP curve boundary: when USDC is depleted by prior sells,
+            # k/new_token can exceed remaining reserves. Floor to 0
+            # (user receives nothing). This is geometrically expected
+            # on a fully-drained curve, not a math error.
+            raw_out = max(D(0), usdc_reserve - new_usdc)
+            self.minted -= amount
+        else:
+            self.minted -= amount
+            supply_after = self.minted
+            supply_before = supply_after + amount
+            assert self._integral is not None
+            base_return = self._integral(supply_after, supply_before)
+            raw_out = base_return * self._get_sell_multiplier()
+
+        # Cap output to fair share of vault
+        original_minted = self.minted + amount
+        if original_minted == 0:
+            out_amount = min(raw_out, self.vault.balance_of())
+        else:
+            user_fraction = amount / original_minted
+            out_amount = self._apply_fair_share_cap(raw_out, user_fraction)
+
+        # Update buy_usdc tracking
+        self.buy_usdc -= principal_portion
+        if user.name in self.user_buy_usdc:
+            self.user_buy_usdc[user.name] -= user_principal_reduction
+            if self.user_buy_usdc[user.name] <= D(0):
+                del self.user_buy_usdc[user.name]
+
+        # Clear dust from accumulated rounding when supply is effectively zero
+        if self.minted < DUST:
+            self.minted = D(0)
+            self.buy_usdc = D(0)
+
+        self.dehypo(out_amount)
+        self.balance_usd -= out_amount
+        user.balance_usd += out_amount
+
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │                        ADD LIQUIDITY                                  │
+    # └───────────────────────────────────────────────────────────────────────┘
+
+    def add_liquidity(self, user: User, token_amount: D, usd_amount: D):
+        """User deposits tokens + USDC as a liquidity position."""
+        user.balance_token -= token_amount
+        user.balance_usd -= usd_amount
+        self.balance_token += token_amount
+        self.balance_usd += usd_amount
+        self.lp_usdc += usd_amount
+        self.rehypo()
+
+        # Snapshot compounding index for yield calculation on removal
+        self.user_snapshot[user.name] = Vault.Snapshot(self.vault.compounding_index)
+        self.liquidity_token[user.name] = self.liquidity_token.get(user.name, D(0)) + token_amount
+        self.liquidity_usd[user.name] = self.liquidity_usd.get(user.name, D(0)) + usd_amount
+
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │                      REMOVE LIQUIDITY                                 │
+    # └───────────────────────────────────────────────────────────────────────┘
+
+    def remove_liquidity(self, user: User):
+        """Withdraw LP position: original deposit + accrued yield (fair-share capped)."""
+        token_deposit = self.liquidity_token[user.name]
+        usd_deposit = self.liquidity_usd[user.name]
+        buy_usdc_principal = self.user_buy_usdc.get(user.name, D(0))
+
+        # Yield delta since deposit
+        delta = self.vault.compounding_index / self.user_snapshot[user.name].index
+
+        # Uncapped yield on LP deposit, tokens, and buy principal
+        usd_yield = usd_deposit * (delta - D(1))
+        usd_amount_full = usd_deposit + usd_yield
+
+        inflation_delta = D(1) + (delta - D(1)) * self.token_inflation_factor
+        token_yield_full = token_deposit * (inflation_delta - D(1))
+
+        buy_usdc_yield_full = buy_usdc_principal * (delta - D(1))
+        total_usdc_full = usd_amount_full + buy_usdc_yield_full
+
+        # Fair share scaling to prevent over-withdrawal from vault
+        principal = usd_deposit + buy_usdc_principal
+        total_principal = self.lp_usdc + self.buy_usdc
+        scaling_factor = self._get_fair_share_scaling(total_usdc_full, principal, total_principal)
+
+        # Apply scaling
+        total_usdc = total_usdc_full * scaling_factor
+        token_yield = token_yield_full * scaling_factor
+        token_amount = token_deposit + token_yield
+        
+        # Mint yield tokens and pull USDC from vault
+        self.mint(token_yield)
+        self.dehypo(total_usdc)
+        
+        # Update aggregate USDC tracking (principal only, never yield)
+        self.lp_usdc -= usd_deposit
+        if self.lp_usdc < DUST:
+            self.lp_usdc = D(0)
+
+        # Transfer to user
+        self.balance_token -= token_amount
+        self.balance_usd -= total_usdc
+        user.balance_token += token_amount
+        user.balance_usd += total_usdc
+
+        del self.liquidity_token[user.name]
+        del self.liquidity_usd[user.name]
+
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                            RESULT TYPES                                   ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+
+class SingleUserResult(TypedDict):
+    codename: str
+    tokens_bought: D
+    price_after_buy: D
+    price_after_lp: D
+    price_after_compound: D
+    final_usdc: D
+    profit: D
+    vault_remaining: D
+
+
+class MultiUserResult(TypedDict):
+    codename: str
+    profits: dict[str, D]
+    vault: D
+
+
+class BankRunResult(TypedDict):
+    codename: str
+    profits: dict[str, D]
+    winners: int
+    losers: int
+    total_profit: D
+    vault: D
+
+
+class ScenarioResult(TypedDict, total=False):
+    """Unified result type for new scenarios. Uses total=False — all fields optional."""
+    # Core fields (always present in practice)
+    codename: str
+    profits: dict[str, D]
+    vault: D
+    
+    # Scenario-specific metadata
+    winners: int
+    losers: int
+    total_profit: D
+    strategies: dict[str, D]       # LP fraction per user (partial_lp)
+    entry_prices: dict[str, D]     # Price when user entered (late)
+    timeline: list[str]            # Event log (real_life)
+
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                           MODEL FACTORY                                   ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+def create_model(
+    codename: str,
+    *,
+    vault_apy: Optional[D] = None,
+    token_inflation_factor: Optional[D] = None,
+    poly_exponent: Optional[D] = None,
+) -> tuple[Vault, LP]:
+    """Create a (Vault, LP) pair for the given model codename.
+
+    Optional overrides allow tests to vary parameters without monkeypatching globals.
+    """
+    cfg = MODELS[codename]
+    # Poly exponent: explicit override > config > global default
+    effective_exponent = poly_exponent or cfg.get("poly_exponent")
+    vault = Vault(apy=vault_apy if vault_apy is not None else VAULT_APY)
+    lp = LP(
+        vault, cfg["curve"], cfg["yield_impacts_price"], cfg["lp_impacts_price"],
+        token_inflation_factor=(
+            token_inflation_factor if token_inflation_factor is not None
+            else TOKEN_INFLATION_FACTOR
+        ),
+        poly_exponent=effective_exponent,
+    )
+    return vault, lp
+
+def model_label(codename: str) -> str:
+    """Human-readable label: 'CYN (Constant Product, Yield->P=Y, LP->P=N)'."""
+    cfg = MODELS[codename]
+    curve = CURVE_NAMES[cfg["curve"]]
+    yp = "Y" if cfg["yield_impacts_price"] else "N"
+    lp = "Y" if cfg["lp_impacts_price"] else "N"
+    deprecated = " [archived]" if cfg["deprecated"] else ""
+    return f"{codename} ({curve}, Yield→P={yp}, LP→P={lp}){deprecated}"
