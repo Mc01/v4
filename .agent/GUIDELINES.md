@@ -34,6 +34,7 @@ These guidelines define the standards for code quality, style, and philosophy fo
 7.  **Math & Precision**
     - Favour `Decimal` over `float` or `integer` where clean and sensible.
     - Treat math like an art.
+    - **Notebook Sync**: Always regenerate the math visualization Jupyter Notebook (`.agent/math/curves.ipynb`) whenever `sim/MATH.md` or core math formulas are modified, to ensure it reflects the latest formulas.
 
 8.  **Root Cause Fixes**
     - Always aim to fix the real issue.

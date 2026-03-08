@@ -18,6 +18,10 @@
 python3 -m sim.test.run_all
 ```
 
+## Virtual Environment
+
+The project relies on a local virtual environment located in the `venv/` directory. Ensure appropriate dependencies (e.g. `jupyter`, `matplotlib`) are installed and run python commands from this environment when working with external tools or notebooks.
+
 ## File Structure
 
 ```
