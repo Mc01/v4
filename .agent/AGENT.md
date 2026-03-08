@@ -12,14 +12,13 @@ Commonwealth is a yield-bearing LP token protocol. Users buy tokens with USDC, p
 |---|------|-------------|----------------|
 | 1 | **[CONTEXT.md](./CONTEXT.md)** | Always | How to run, code locations, current problems, file map |
 | 2 | **[MISSION.md](./MISSION.md)** | For design decisions | Value proposition, yield design, why buy_usdc_yield to LPs is intentional |
-| 3 | **[math/FINDINGS.md](./math/FINDINGS.md)** | For analysis context | Root causes of vault residuals, mathematical proofs, known issues |
-| 4 | **[math/PLAN.md](./math/PLAN.md)** | For implementation work | Exact code changes, execution order, success criteria |
-| 5 | **[math/VALUES.md](./math/VALUES.md)** | For reference data | Manual calculations, scenario traces, actual vs expected numbers |
-| 6 | **[../sim/MATH.md](../sim/MATH.md)** | For protocol math | All formulas, curve integrals, price multiplier mechanism |
-| 7 | **[../sim/MODELS.md](../sim/MODELS.md)** | For model matrix | Codename convention, archived models, tradeoffs |
-| 8 | **[../sim/TEST.md](../sim/TEST.md)** | For test env specifics | Virtual reserves, exposure factor, test-only mechanics |
-| 9 | **[GUIDELINES.md](./GUIDELINES.md)** | For coding standards | Code style, principles, testing philosophy |
-| 10 | **[workflows/ULTRAWORK.md](./workflows/ULTRAWORK.md)** | When user says "ultrawork" | Maximum precision mode — certainty protocol, zero-compromise delivery |
+| 3 | **[math/VALUES.md](./math/VALUES.md)** | For reference data | Current scenario results, comparison table, key observations |
+| 4 | **[../sim/MATH.md](../sim/MATH.md)** | For protocol math | All formulas, curve integrals, price multiplier mechanism |
+| 5 | **[../sim/MODELS.md](../sim/MODELS.md)** | For model matrix | Codename convention, archived models, tradeoffs |
+| 6 | **[../sim/TEST.md](../sim/TEST.md)** | For test env specifics | Virtual reserves, exposure factor, test-only mechanics |
+| 7 | **[GUIDELINES.md](./GUIDELINES.md)** | For coding standards | Code style, principles, testing philosophy |
+| 8 | **[workflows/ULTRAWORK.md](./workflows/ULTRAWORK.md)** | When user says "ultrawork" | Maximum precision mode — certainty protocol, zero-compromise delivery |
+| 9 | **[FINDINGS.md](./FINDINGS.md)** | For planned refactoring | Detailed Python code cleanup and architectural modularity plan (Phase 10+) |
 
 ---
 

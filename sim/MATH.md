@@ -155,7 +155,7 @@ Sell: base_return = integral(supply_after, supply_before)
       usdc_out = base_return * multiplier
 ```
 
-**Why this matters**: The multiplier changes between buy and sell as buy_usdc and vault balance shift. For nonlinear curves, `integral(a,b)/m1 * m2 != cost * (m2/m1)`. SYN avoids this because its integral is linear at saturation. EYN amplifies it exponentially. See [../.agent/math/FINDINGS.md](../.agent/math/FINDINGS.md) Root Cause #2.
+**Why this matters**: The multiplier changes between buy and sell as buy_usdc and vault balance shift. For nonlinear curves, `integral(a,b)/m1 * m2 != cost * (m2/m1)`. SYN avoids this because its integral is linear at saturation. EYN amplifies it exponentially.
 
 ---
 
@@ -266,15 +266,15 @@ Price grows logarithmically — fast initially, then slowing down. Creates dimin
 
 **High-level:**
 ```
-price(s) = base_price * ln(1 + k * s)
+price(s) = base_price * (1 + ln(1 + k * s))
 
-buy_cost(s, n) = integral from s to s+n of base_price * ln(1 + k*x) dx
-             = base_price * [((1 + k*(s+n)) * ln(1 + k*(s+n)) - (1 + k*s) * ln(1 + k*s)) / k - n]
+buy_cost(s, n) = integral from s to s+n of base_price * (1 + ln(1 + k*x)) dx
+             = base_price * [((1 + k*(s+n)) * ln(1 + k*(s+n)) - (1 + k*s) * ln(1 + k*s)) / k]
 ```
 
 **Exact formulas:**
 ```
-p(s) = P₀ · ln(1 + ks)                              # price at supply s
+p(s) = P₀ · (1 + ln(1 + ks))                        # price at supply s
 
 F(x) = P₀ · [(u·ln(u) - u)/k + x]  where u = 1 + kx  # antiderivative
 
@@ -283,7 +283,7 @@ F(x) = P₀ · [(u·ln(u) - u)/k + x]  where u = 1 + kx  # antiderivative
 
 **Copyable (Python/code):**
 ```python
-price = P0 * log(1 + k * s)
+price = P0 * (1 + log(1 + k * s))
 
 def F(x):
     u = 1 + k * x
@@ -307,28 +307,28 @@ Price grows as a power of supply. The exponent `n` controls steepness — sub-qu
 
 **High-level:**
 ```
-price(s) = base_price * k * s^n
+price(s) = base_price * (1 + k * s^n)
 
-buy_cost(s, tokens) = integral from s to s+tokens of base_price * k * x^n dx
-                   = base_price * k * ((s+tokens)^(n+1) - s^(n+1)) / (n+1)
+buy_cost(s, tokens) = integral from s to s+tokens of base_price * (1 + k * x^n) dx
+                   = base_price * tokens + base_price * k * ((s+tokens)^(n+1) - s^(n+1)) / (n+1)
 ```
 
 **Exact formulas:**
 ```
-p(s) = P₀ · k · sⁿ                                    # price at supply s
+p(s) = P₀ · (1 + k · sⁿ)                              # price at supply s
 
-∫ₐᵇ P₀ · k · xⁿ dx = P₀ · k · (bⁿ⁺¹ - aⁿ⁺¹) / (n+1)  # cost from a to b
+∫ₐᵇ P₀ · (1 + k · xⁿ) dx = P₀·(b−a) + P₀·k·(bⁿ⁺¹ − aⁿ⁺¹)/(n+1)  # cost from a to b
 ```
 
 **Copyable (Python/code):**
 ```python
-price = P0 * k * s ** n
-cost = P0 * k * (b ** (n + 1) - a ** (n + 1)) / (n + 1)
+price = P0 * (1 + k * s ** n)
+cost = P0 * (b - a) + P0 * k * (b ** (n + 1) - a ** (n + 1)) / (n + 1)
 ```
 
 | ✅ Strengths | ❌ Weaknesses |
 |-------------|---------------|
-| Configurable growth via exponent | p(0) = 0 — first tokens are free |
+| Configurable growth via exponent | Steep at high supply for n > 2 |
 | Predictable power-law dynamics | Steep at high supply for n > 2 |
 | No overflow risk (unlike EXP) | Fractional exponents need clamping for s < 0 |
 | Good middle ground | Less capital-efficient than CP |
@@ -427,5 +427,5 @@ Curve-specific constants (vary per implementation):
 | Constant Product | `y / x` | AMM swap formula |
 | Exponential | `P₀ · eᵏˢ` | `(P₀/k) · (eᵏᵇ - eᵏᵃ)` |
 | Sigmoid | `Pₘₐₓ / (1 + e⁻ᵏ⁽ˢ⁻ᵐ⁾)` | `(Pₘₐₓ/k) · [ln(1+eᵏ⁽ᵇ⁻ᵐ⁾) - ln(1+eᵏ⁽ᵃ⁻ᵐ⁾)]` |
-| Logarithmic | `P₀ · ln(1+ks)` | `F(b) - F(a)` where `F(x) = P₀·[(u·ln(u)-u)/k + x]` |
-| Polynomial | `P₀ · k · sⁿ` | `P₀ · k · (bⁿ⁺¹ - aⁿ⁺¹) / (n+1)` |
+| Logarithmic | `P₀ · (1+ln(1+ks))` | `F(b) - F(a)` where `F(x) = P₀·[(u·ln(u)-u)/k + x]` |
+| Polynomial | `P₀ · (1+k·sⁿ)` | `P₀·(b−a) + P₀·k·(bⁿ⁺¹−aⁿ⁺¹)/(n+1)` |

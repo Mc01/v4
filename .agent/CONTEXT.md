@@ -3,7 +3,7 @@
 ## How to Run
 
 ```bash
-# Run comparison table (all 4 active models × all scenarios)
+# Run comparison table (all 7 active models × all scenarios)
 ./run_sim.sh
 
 # Run a specific model (all scenarios, verbose)
@@ -34,10 +34,10 @@ sim/
 .agent/
   AGENT.md             # Agent orientation (entry point, reading order, glossary)
   CONTEXT.md           # This file — operational guide, code locations, current state
+  FINDINGS.md          # Proposed Python cleanup and modular architecture refactoring plan
   MISSION.md           # Design principles, yield philosophy, "common yield" rationale
   GUIDELINES.md        # Coding standards (typing, comments, testing, benchmarking)
-  math/FINDINGS.md     # Root cause analysis, mathematical proofs, parameter sensitivity
-  math/PLAN.md         # Implementation plan: FIX 1-4 (DONE) + Phase 5 (NEXT)
+  math/PLAN.md         # Implementation plan: FIX 1-4 (DONE), Phases 1-9 (DONE)
   math/VALUES.md       # Manual calculations, scenario traces, actual results
 ```
 
@@ -69,7 +69,7 @@ sim/
 
 ### All Residuals Eliminated
 
-**ALL 4 models × 6 scenarios = 24 combinations show 0 vault residual.**
+**ALL 7 models × all scenarios = 0 vault residual.**
 
 | Model | Vault Residual | Fix Applied |
 |-------|:---:|-------------|
@@ -106,7 +106,7 @@ sim/
 
 ### Test Suite
 
-310 tests across 7 modules (4 base curves + 3 polynomial variants = 7 active models, 434 tests):
+62 test functions × 7 active models = 434 tests across 7 modules:
 
 | Module | Tests | What |
 |--------|:---:|------|
@@ -118,16 +118,16 @@ sim/
 | test_scenarios | 13×7=91 | End-to-end scenario validation |
 | test_coverage_gaps | 18×7=126-7=119 | Edge cases, FIX 4 regression, sigmoid edges, multi-LP |
 
-### Next Steps
+### Completed Phases
 
-See [math/PLAN.md](./math/PLAN.md):
+| Phase | Scope |
+|-------|-------|
+| **1-4** | FIX 1-4: vault residual elimination |
+| **5** | Code cleanup (dead code, unused imports, typing, DU1 curve dispatch) |
+| **6** | Architecture (Vault.Snapshot, comments cleanup) |
+| **7** | Tests TG1-TG7 (28 new tests, 248 total) |
+| **8** | Polynomial curves (P15YN/P20YN/P25YN), Reverse Whale, Stochastic (434 tests) |
+| **9** | Math issues analysis (MA1-MA5), log/poly price offset fix |
+| **10 (Planned)** | Architecture modularization & Python code cleanup (see `FINDINGS.md`) |
 
-| Phase | Status | Scope |
-|-------|--------|-------|
-| **5** | **DONE** | Code cleanup (dead code, unused imports, typing, NamedTuples, DU1 curve dispatch) |
-| **6** | **DONE** | Architecture (A3: UserSnapshot → Vault.Snapshot, comments cleanup) |
-| **7** | **DONE** | Tests TG1-TG7 (28 new tests, 248 total) |
-| **8** | **DONE** | Polynomial curve (P15YN n=1.5, P20YN n=2, P25YN n=2.5), Reverse Whale, Stochastic (434 tests) |
-| **9** | Planned | Math issues report (MA1-MA6 detailed analysis) |
-
-For root cause analysis, see [math/FINDINGS.md](./math/FINDINGS.md). For yield design rationale, see [MISSION.md](./MISSION.md).
+For yield design rationale, see [MISSION.md](./MISSION.md).

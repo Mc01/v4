@@ -43,7 +43,7 @@
 **The buy_usdc_yield going to LPs in `remove_liquidity()` is INTENTIONAL.**
 
 ```python
-# core.py:612-613 — THIS IS CORRECT, NOT A BUG
+# core.py — THIS IS CORRECT, NOT A BUG
 buy_usdc_yield_full = buy_usdc_principal * (delta - D(1))
 total_usdc_full = usd_amount_full + buy_usdc_yield_full
 ```
@@ -70,4 +70,4 @@ Active models: **CYN** (Constant Product), **EYN** (Exponential), **SYN** (Sigmo
 1. **Price appreciation**: `effective_usdc = buy_usdc * (vault / total_principal)` inflates the curve
 2. **Direct LP withdrawal**: `remove_liquidity()` pays LPs yield as USDC
 
-In single-user scenarios, these cancel out perfectly (mathematically proven — see [math/FINDINGS.md](./math/FINDINGS.md)). In multi-user scenarios, the bonding curve must be symmetric for conservation to hold. After FIX 1 (CYN k-inflation) and FIX 4 (principal-only sell multiplier), **all four models achieve 0 residual across all scenarios**.
+In single-user scenarios, these cancel out perfectly (mathematically proven). In multi-user scenarios, the bonding curve must be symmetric for conservation to hold. After FIX 1 (CYN k-inflation) and FIX 4 (principal-only sell multiplier), **all 7 active models achieve 0 residual across standard scenarios**.

@@ -3,11 +3,14 @@
 ╔═══════════════════════════════════════════════════════════════════════════╗
 ║             Commonwealth Protocol - Run All Tests                         ║
 ╠═══════════════════════════════════════════════════════════════════════════╣
-║  Usage: python3 -m sim.test.run_all (from project root)                  ║
+║  Usage: python3 -m sim.test.run_all                (summary only)        ║
+║         python3 -m sim.test.run_all -vv            (show failures)       ║
+║         python3 -m sim.test.run_all -vvv           (show all tests)      ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 """
 import sys
 
+from . import helpers
 from .helpers import TestResults, run_for_all_models, section_header
 from . import test_conservation
 from . import test_invariants
@@ -19,6 +22,14 @@ from . import test_coverage_gaps
 
 
 def main():
+    # Parse -v flags: -vv = failures only, -vvv = all tests
+    v_count = 0
+    for arg in sys.argv[1:]:
+        if arg.startswith("-v"):
+            v_count += len(arg) - 1  # -vv = 2, -vvv = 3
+    # Map: -vv (2) → verbosity 1 (failures), -vvv (3+) → verbosity 2 (all)
+    helpers.VERBOSITY = max(0, v_count - 1)
+
     results = TestResults()
     
     print("╔═══════════════════════════════════════════════════════════════════════╗")
@@ -59,4 +70,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -308,7 +308,7 @@ def _sig_price(s: D) -> D:
 # └─────────────────────────────────────┘
 
 def _log_integral(a: D, b: D) -> D:
-    """Integral of base * ln(1 + k*x) from a to b."""
+    """Integral of base * (1 + ln(1 + k*x)) from a to b."""
     def F(x: D) -> D:
         u = D(1) + LOG_K * x
         if u <= 0:
@@ -317,10 +317,12 @@ def _log_integral(a: D, b: D) -> D:
     return F(b) - F(a)
 
 def _log_price(s: D) -> D:
-    """Logarithmic spot price. Returns 0 at s=0 (ln(1)=0) — this is by design;
-    the integral from 0 is well-defined and the first tokens cost near-zero USDC."""
+    """Logarithmic spot price: P₀·(1 + ln(1 + k·s)).
+
+    Starts at P₀ = 1.0 at s=0, grows logarithmically. The +1 offset
+    ensures p(0) = base_price, consistent with the integral function."""
     val = D(1) + LOG_K * s
-    return LOG_BASE_PRICE * val.ln() if val > 0 else D(0)
+    return LOG_BASE_PRICE * (D(1) + val.ln()) if val > 0 else D(0)
 
 
 # ┌─────────────────────────────────────┐
@@ -328,9 +330,9 @@ def _log_price(s: D) -> D:
 # └─────────────────────────────────────┘
 
 def _poly_integral(a: D, b: D, *, exponent: D = POLY_EXPONENT) -> D:
-    """Integral of base_price * k * x^n from a to b.
+    """Integral of base_price * (1 + k * x^n) from a to b.
 
-    = base_price * k * (b^(n+1) - a^(n+1)) / (n+1)
+    = base_price * (b - a) + base_price * k * (b^(n+1) - a^(n+1)) / (n+1)
 
     Guards: For fractional exponents (e.g., 1.5, 2.5), Decimal raises
     InvalidOperation on negative bases. Floor to 0 if supply goes negative.
@@ -339,16 +341,18 @@ def _poly_integral(a: D, b: D, *, exponent: D = POLY_EXPONENT) -> D:
     # Fractional exponents cannot handle negative bases in Decimal
     a_clamped = max(a, D(0))
     b_clamped = max(b, D(0))
-    return POLY_BASE_PRICE * POLY_K * (b_clamped ** n1 - a_clamped ** n1) / n1
+    base_cost = POLY_BASE_PRICE * (b_clamped - a_clamped)
+    curve_cost = POLY_BASE_PRICE * POLY_K * (b_clamped ** n1 - a_clamped ** n1) / n1
+    return base_cost + curve_cost
 
 def _poly_price(s: D, *, exponent: D = POLY_EXPONENT) -> D:
-    """Polynomial spot price: base_price * k * s^n.
+    """Polynomial spot price: base_price * (1 + k * s^n).
 
-    Returns 0 for s <= 0 (guard for fractional exponents).
+    Starts at base_price at s=0, grows as power law + offset.
     """
     if s <= D(0):
-        return D(0)
-    return POLY_BASE_PRICE * POLY_K * s ** exponent
+        return POLY_BASE_PRICE
+    return POLY_BASE_PRICE * (D(1) + POLY_K * s ** exponent)
 
 
 # ┌─────────────────────────────────────┐

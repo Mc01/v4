@@ -79,7 +79,7 @@ def test_multi_user_full_exit_empties_vault(model: str):
     total_deposited = D(5000)  # 5 users * (500 buy + 500 LP)
     residual_pct = vault_remaining / total_deposited * 100
 
-    # Vault residual is a known curve asymmetry issue (FINDINGS.md #2).
+    # Vault residual is a known curve asymmetry issue (FIX 4).
     # Integral curves have price multiplier mismatch between buy and sell;
     # token inflation adds unbacked tokens that extract additional USDC.
     # CYN: ~0 after FIX 1. EYN/SYN/LYN: <3% from multiplier asymmetry.
