@@ -228,8 +228,9 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  ./run_sim.sh                    # Compare 6 active *YN models (table view)
-  ./run_sim.sh CYN                # All scenarios for one model (verbose)
+  ./run_sim.sh                    # All scenarios for the chosen model (P12YN)
+  ./run_sim.sh P12YN              # Equivalent to above
+  ./run_sim.sh --active           # Compare all active *YN models (table view)
   ./run_sim.sh CYN,EYN,SYN        # Compare specific models (table view)
   ./run_sim.sh --all              # Include all 20 models (incl. archived)
   ./run_sim.sh --single           # Single-user scenario for active models
@@ -248,11 +249,15 @@ Examples:
     )
     parser.add_argument(
         "models", nargs="?", default=None,
-        help="Model code(s) to test, comma-separated (e.g., CYN or CYN,EYN,SYN). Default: active *YN models."
+        help="Model code(s) to test, comma-separated (e.g., CYN or CYN,EYN,SYN). Default: P12YN."
     )
     parser.add_argument(
         "--all", "-a", action="store_true", dest="include_all",
         help="Include archived models (non-*YN) in comparison"
+    )
+    parser.add_argument(
+        "--active", action="store_true", dest="include_active",
+        help="Include all active models in comparison"
     )
     parser.add_argument(
         "--single", action="store_true",
@@ -321,7 +326,12 @@ Examples:
                 print(f"Available: {', '.join(sorted(MODELS.keys()))}")
                 sys.exit(1)
     else:
-        codes = list(MODELS.keys()) if args.include_all else ACTIVE_MODELS
+        if args.include_all:
+            codes = list(MODELS.keys())
+        elif args.include_active:
+            codes = ACTIVE_MODELS
+        else:
+            codes = ["P12YN"]
     
     # ┌───────────────────────────────────────────────────────────────────────┐
     # │     Dispatch: Comparison Table (Multiple) or Verbose (Single)         │

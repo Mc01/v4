@@ -77,7 +77,7 @@ sim/
 
 ## Protocol State & Invariants
 
-**Current Status:** Validating 5 active models.
+**Current Status:** P12YN is the chosen model. Validating 6 active models for metrics and comparison.
 
 1. **Zero Vault Residual Guarantee:** Across all 5 models and 10 scenarios, vault residual is **0 USDC**.
 2. **Symmetric Buy/Sell:** Sell operations use a principal-only multiplier `(buy_usdc + lp_usdc) / buy_usdc`. Yield does *not* inflate sell prices.

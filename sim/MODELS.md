@@ -30,7 +30,9 @@ These properties are the same across all active models:
 
 ## Active Models
 
-7 active models — 4 base curves + 3 polynomial exponent variants:
+**P12YN is "the one" chosen model for the Commonwealth protocol.**
+
+The following 6 models are active in the test suite for metrics reference and performance comparison:
 
 | Codename | Curve Type | Exponent | Yield → Price | LP → Price |
 |----------|-----------|:---:|:---:|:---:|

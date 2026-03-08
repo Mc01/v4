@@ -58,8 +58,12 @@ flowchart LR
 
 The `sim/` directory contains Python models that simulate the protocol under various configurations. The purpose is to **validate math and choose the correct model** before writing Solidity contracts.
 
+After extensive testing, **P12YN (Polynomial n=1.2)** has been selected as "the one" chosen model for the Commonwealth protocol. It provides the most elegant and balanced growth curve while remaining sustainable.
+
+Other models remain in the codebase strictly for metrics reference, performance comparison, and testing.
+
 Each model is defined by its **bonding curve type**:
-- **Constant Product** (CYN), **Exponential** (EYN), **Sigmoid** (SYN), **Logarithmic** (LYN), **Polynomial** (P15YN, P20YN, P25YN)
+- **Constant Product** (CYN), **Exponential** (EYN), **Sigmoid** (SYN), **Logarithmic** (LYN), **Polynomial** (P12YN, P15YN)
 
 Fixed invariants across all models:
 - **Yield → Price = Yes** — vault compounding grows token price
@@ -73,13 +77,14 @@ See [MODELS.md](sim/MODELS.md) for the full model matrix and [MATH.md](sim/MATH.
 ## How to Run
 
 ```bash
-# Run comparison table (all 7 active models × all scenarios)
+# Run the chosen model (P12YN) explicitly or implicitly
 ./run_sim.sh
+./run_sim.sh P12YN
 
-# Run a specific model
-./run_sim.sh CYN
+# Run comparison table with all active models
+./run_sim.sh --active
 
-# Run specific scenario
+# Run specific scenario for the chosen model
 ./run_sim.sh --whale CYN
 ./run_sim.sh --bank
 ./run_sim.sh --rwhale           # Reverse whale (whale exits first)
