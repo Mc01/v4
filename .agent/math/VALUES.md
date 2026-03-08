@@ -1,6 +1,6 @@
 # Reference Data — Current Scenario Results
 
-All data captured post-FIX 1-4, post-price-offset (log/poly start at base_price=1.0).
+All data captured post-price-offset (log/poly start at base_price=1.0).
 7 active models: CYN, EYN, SYN, LYN, P15YN, P20YN, P25YN.
 
 ---

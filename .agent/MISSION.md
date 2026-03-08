@@ -70,4 +70,4 @@ Active models: **CYN** (Constant Product), **EYN** (Exponential), **SYN** (Sigmo
 1. **Price appreciation**: `effective_usdc = buy_usdc * (vault / total_principal)` inflates the curve
 2. **Direct LP withdrawal**: `remove_liquidity()` pays LPs yield as USDC
 
-In single-user scenarios, these cancel out perfectly (mathematically proven). In multi-user scenarios, the bonding curve must be symmetric for conservation to hold. After FIX 1 (CYN k-inflation) and FIX 4 (principal-only sell multiplier), **all 7 active models achieve 0 residual across standard scenarios**.
+In single-user scenarios, these cancel out perfectly (mathematically proven). In multi-user scenarios, the bonding curve must be symmetric for conservation to hold. With a stabilized k-invariant and principal-only sell multiplier, **all 7 active models achieve 0 residual across standard scenarios**.

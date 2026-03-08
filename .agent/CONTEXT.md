@@ -15,7 +15,9 @@
 ./run_sim.sh --multi CYN,EYN
 
 # Run full test suite (434 tests, 7 modules)
-python3 -m sim.test.run_all
+./run_test.sh          # Summary only
+./run_test.sh -vv      # Show failures only
+./run_test.sh -vvv     # Show all individual tests
 ```
 
 ## Virtual Environment
@@ -26,7 +28,7 @@ The project relies on a local virtual environment located in the `venv/` directo
 
 ```
 sim/
-  core.py              # ALL protocol logic: LP class, Vault, curves, buy/sell/LP operations (848 lines)
+  core.py              # ALL protocol logic: LP class, Vault, curves, buy/sell/LP operations (853 lines)
   run_model.py         # CLI entry point: argparse, comparison table, scenario dispatch
   formatter.py         # Output formatting: Formatter class, verbosity levels, ASCII art
   scenarios/           # 10 scenario files: single_user, multi_user, bank_run, whale, hold, late, partial_lp, real_life, reverse_whale, stochastic
@@ -41,8 +43,10 @@ sim/
   FINDINGS.md          # Proposed Python cleanup and modular architecture refactoring plan
   MISSION.md           # Design principles, yield philosophy, "common yield" rationale
   GUIDELINES.md        # Coding standards (typing, comments, testing, benchmarking)
-  math/PLAN.md         # Implementation plan: FIX 1-4 (DONE), Phases 1-9 (DONE)
-  math/VALUES.md       # Manual calculations, scenario traces, actual results
+  workflows/           # Agent operating modes (e.g., ULTRAWORK)
+  math/
+    VALUES.md          # Manual calculations, scenario traces, actual results
+    curves.ipynb       # Interactive math curve visualizations
 ```
 
 ## Key Code Locations (`sim/core.py`)
@@ -51,87 +55,48 @@ sim/
 |-----------|-------|-------------|
 | Exceptions | 17-24 | `ProtocolError`, `MintCapExceeded`, `NothingStaked` |
 | Constants & CurveConfig | 27-80 | CAP, EXPOSURE_FACTOR, VIRTUAL_LIMIT, VAULT_APY, `CurveConfig` dataclass, `EXP_CFG`/`SIG_CFG`/`LOG_CFG` |
-| Enums & Model registry | 86-145 | `CurveType`, `ModelConfig`, `MODELS` dict, `ACTIVE_MODELS` = CYN, EYN, SYN, LYN, P15YN, P20YN, P25YN |
-| Core classes | 159-221 | `User`, `CompoundingSnapshot`, `Vault` (with inner `Snapshot`) |
-| Curve integrals | 230-328 | `_exp_integral`, `_sig_integral`, `_log_integral`, `_bisect_tokens_for_cost` |
-| Curve dispatch | 331-341 | `_CURVE_DISPATCH` table mapping `CurveType` → `(integral_fn, spot_price_fn)` |
-| `LP.__init__` | 355-389 | State: buy_usdc, lp_usdc, minted, k, user tracking, `self._integral`/`self._spot_price` |
-| `_get_effective_usdc()` | 395-411 | `buy_usdc * (vault / total_principal)` — yield inflates pricing input |
-| `_get_price_multiplier()` | 413-421 | `effective_usdc / buy_usdc` — scales integral curve **buy** prices |
-| `_get_sell_multiplier()` | 423-436 | FIX 4: `(buy_usdc + lp_usdc) / buy_usdc` — principal-only, no yield inflation |
-| Virtual reserves (CYN) | 442-475 | `get_exposure`, `get_virtual_liquidity`, `_get_token/usdc_reserve` |
-| `price` property | 481-492 | CP: `usdc_reserve / token_reserve`. Integral: `base_price(s) * multiplier` |
-| Fair share cap | 498-514 | `_apply_fair_share_cap`, `_get_fair_share_scaling` — prevents vault drain |
-| `buy()` | 541-566 | USDC → tokens. CP: k-invariant swap. Integral: bisect for token count |
-| `sell()` | 572-633 | Tokens → USDC. Integral curves use `_get_sell_multiplier()` (FIX 4) |
-| `add_liquidity()` | 638-650 | Deposits tokens + USDC pair into vault |
-| `remove_liquidity()` | 656-704 | LP withdrawal: principal + yield (LP USDC + buy USDC) + token inflation |
-| Result types | 712-751 | `SingleUserResult`, `MultiUserResult`, `BankRunResult`, `ScenarioResult` |
-| Model factory | 758-787 | `create_model()`, `model_label()` |
+| Enums & Model registry | 86-151 | `CurveType`, `ModelConfig`, `MODELS` dict, `ACTIVE_MODELS` = CYN, EYN, SYN, LYN, P15YN, P20YN, P25YN |
+| Core classes | 152-228 | `Color`, `User`, `CompoundingSnapshot`, `Vault` (with inner `Snapshot`) |
+| Curve integrals | 268-382 | `_exp_integral`, `_poly_integral`, `_log_integral`, `_bisect_tokens_for_cost` |
+| Curve dispatch | 388-400 | `_CURVE_DISPATCH` table mapping `CurveType` → `(integral_fn, spot_price_fn)` |
+| `LP.__init__` | 407-458 | State: buy_usdc, lp_usdc, minted, k, user tracking, `self._integral`/`self._spot_price` |
+| `_get_effective_usdc()` | 462-475 | `buy_usdc * (vault / total_principal)` — yield inflates pricing input |
+| `_get_price_multiplier()` | 480-488 | `effective_usdc / buy_usdc` — scales integral curve **buy** prices |
+| `_get_sell_multiplier()` | 490-504 | `(buy_usdc + lp_usdc) / buy_usdc` — principal-only, no yield inflation |
+| Virtual reserves (CYN) | 509-544 | `get_exposure`, `get_virtual_liquidity`, `_get_token/usdc_reserve` |
+| `price` property | 547-558 | CP: `usdc_reserve / token_reserve`. Integral: `base_price(s) * multiplier` |
+| Fair share cap | 563-580 | `_apply_fair_share_cap`, `_get_fair_share_scaling` — prevents vault drain |
+| `buy()` | 606-633 | USDC → tokens. CP: k-invariant swap. Integral: bisect for token count |
+| `sell()` | 637-695 | Tokens → USDC. Integral curves use `_get_sell_multiplier()` |
+| `add_liquidity()` | 703-718 | Deposits tokens + USDC pair into vault |
+| `remove_liquidity()` | 721-768 | LP withdrawal: principal + yield (LP USDC + buy USDC) + token inflation |
+| Result types | 774-810 | `SingleUserResult`, `MultiUserResult`, `BankRunResult`, `ScenarioResult` |
+| Model factory | 820-853 | `create_model()`, `model_label()` |
 
-## Current State
+---
 
-### All Residuals Eliminated
+## Protocol State & Invariants
 
-**ALL 7 models × all scenarios = 0 vault residual.**
+**Current Status:** Validating 7 active models.
 
-| Model | Vault Residual | Fix Applied |
-|-------|:---:|-------------|
-| **CYN** | **0** | FIX 1: removed `_update_k()` from LP ops (k was inflated 5.79×) |
-| **EYN** | **0** | FIX 4: `_get_sell_multiplier()` (principal-only, no yield in sell) |
-| **SYN** | **0** | None needed — sigmoid ceiling makes integral linear → perfect symmetry |
-| **LYN** | **0** | FIX 4: same as EYN (log gentleness dampened it to 33 USDC, now 0) |
+1. **Zero Vault Residual Guarantee:** Across all 7 models and 10 scenarios, vault residual is **0 USDC**.
+2. **Symmetric Buy/Sell:** Sell operations use a principal-only multiplier `(buy_usdc + lp_usdc) / buy_usdc`. Yield does *not* inflate sell prices.
+3. **Yield Realization:** Users *must* `add_liquidity()` then `remove_liquidity()` to capture yield. Selling tokens directly forfeits vault yield.
+4. **Inflation Isolation:** Token inflation is decoupled via `TOKEN_INFLATION_FACTOR`.
+5. **K-Invariant Stabilized:** LP operations do *not* artificially inflate `k` in CYN models.
 
-### Applied Fixes (all verified, 434/434 tests pass)
+---
 
-| Fix | What it does | Impact |
-|-----|-------------|--------|
-| **FIX 1** | Remove `_update_k()` calls from `add/remove_liquidity()` | CYN: 20k → 0 |
-| **FIX 2** | `raw_out = max(D(0), raw_out)` after CP sell calc | Safety: no negative USDC |
-| **FIX 3** | `TOKEN_INFLATION_FACTOR` constant (default 1.0) | Enables inflation isolation |
-| **FIX 4** | `_get_sell_multiplier()` for integral curve sells | EYN: 7k → 0, LYN: 33 → 0 |
+## Test Suite Reference
 
-### Recent Structural Changes
+434 Total Tests traversing 7 models across 7 domains to guarantee mathematical fidelity:
 
-| Change | What |
-|--------|------|
-| **T2** | `CurveConfig` frozen dataclass groups `base_price`, `k`, `max_price`, `midpoint`. Instances: `EXP_CFG`, `SIG_CFG`, `LOG_CFG`. Backward-compatible aliases kept |
-| **T6** | `Vault.balance_usd` field removed. `balance_of()` returns `D(0)` when no snapshot exists |
-| **T1** | `Color` class unified in `core.py`, imported by `formatter.py` (no more duplicate) |
-| **T5** | ANSI regex pre-compiled as `_ANSI_RE` in `formatter.py` |
+- `test_conservation`: System USDC strict conservation.
+- `test_invariants`: State tracking, sell proportions.
+- `test_yield_accounting`: LP yield distribution and time-scaling.
+- `test_stress`: Atomic vault/LP accounting boundaries.
+- `test_curves`: Integral bounds, bisect precision, overflow guards.
+- `test_scenarios`: End-to-end integration traces.
+- `test_coverage_gaps`: Regression guards (multi-LP edges).
 
-### FIX 4 Mechanism (Critical Design Change)
-
-**Problem**: Buy divides by multiplier, sell multiplied by multiplier. After compounding, multiplier includes yield inflation → sell returns excess USDC → vault residual.
-
-**Fix**: New `_get_sell_multiplier()` returns `(buy_usdc + lp_usdc) / buy_usdc` (or `1` when `lp_impacts_price=False`). This is the **principal-only** ratio — no vault yield. Sell is now symmetric with buy. Yield flows exclusively through `remove_liquidity()`.
-
-**Design implication**: Users who sell tokens get only curve-based pricing (no yield). To capture yield, users must add liquidity first, then `remove_liquidity()`. This is the intended protocol incentive.
-
-### Test Suite
-
-62 test functions × 7 active models = 434 tests across 7 modules:
-
-| Module | Tests | What |
-|--------|:---:|------|
-| test_conservation | 4×7=28 | System USDC conservation across scenarios |
-| test_invariants | 7×7=49 | buy_usdc tracking, sell proportion, LP math |
-| test_yield_accounting | 3×7=21 | LP yield channels, duration scaling |
-| test_stress | 9×7=63 | Atomic vault/LP accounting, multi-user invariants |
-| test_curves | 9×7=63 | Integral math, overflow guards, bisect precision |
-| test_scenarios | 13×7=91 | End-to-end scenario validation |
-| test_coverage_gaps | 18×7=126-7=119 | Edge cases, FIX 4 regression, sigmoid edges, multi-LP |
-
-### Completed Phases
-
-| Phase | Scope |
-|-------|-------|
-| **1-4** | FIX 1-4: vault residual elimination |
-| **5** | Code cleanup (dead code, unused imports, typing, DU1 curve dispatch) |
-| **6** | Architecture (Vault.Snapshot, comments cleanup) |
-| **7** | Tests TG1-TG7 (28 new tests, 248 total) |
-| **8** | Polynomial curves (P15YN/P20YN/P25YN), Reverse Whale, Stochastic (434 tests) |
-| **9** | Math issues analysis (MA1-MA5), log/poly price offset fix |
-| **10 (Planned)** | Architecture modularization & Python code cleanup (see `FINDINGS.md`) |
-
-For yield design rationale, see [MISSION.md](./MISSION.md).
+*(See [FINDINGS.md](./FINDINGS.md) for future improvements and modularization plans).*
