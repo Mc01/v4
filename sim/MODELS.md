@@ -8,6 +8,7 @@ Each model is defined by its **curve type** — the pricing function used for bu
 - **E** = Exponential
 - **S** = Sigmoid
 - **L** = Logarithmic
+- **P** = Polynomial (configurable exponent)
 
 All other dimensions (Yield → Price, LP → Price) are now fixed invariants.
 
@@ -29,21 +30,25 @@ These properties are the same across all active models:
 
 ## Active Models
 
-The 4 active models differ only by curve type:
+7 active models — 4 base curves + 3 polynomial exponent variants:
 
-| Codename | Curve Type | Yield → Price | LP → Price |
-|----------|-----------|:---:|:---:|
-| **CYN** | Constant Product | Yes | No |
-| **EYN** | Exponential | Yes | No |
-| **SYN** | Sigmoid | Yes | No |
-| **LYN** | Logarithmic | Yes | No |
+| Codename | Curve Type | Exponent | Yield → Price | LP → Price |
+|----------|-----------|:---:|:---:|:---:|
+| **CYN** | Constant Product | — | Yes | No |
+| **EYN** | Exponential | — | Yes | No |
+| **SYN** | Sigmoid | — | Yes | No |
+| **LYN** | Logarithmic | — | Yes | No |
+| **P15YN** | Polynomial | 1.5 | Yes | No |
+| **P20YN** | Polynomial | 2.0 | Yes | No |
+| **P25YN** | Polynomial | 2.5 | Yes | No |
 
 ### Codename Convention
 
 `[Curve][Yield→Price][LP→Price]`
 
-- **C** = Constant Product, **E** = Exponential, **S** = Sigmoid, **L** = Logarithmic
+- **C** = Constant Product, **E** = Exponential, **S** = Sigmoid, **L** = Logarithmic, **P** = Polynomial
 - **Y** = Yes, **N** = No
+- Polynomial variants use numeric suffix for exponent: **P15** = n^1.5, **P20** = n^2, **P25** = n^2.5
 
 ---
 
@@ -79,6 +84,7 @@ See [MATH.md](./MATH.md) for detailed formulas, integrals, and behavior analysis
 | **Exponential** | Very strong | Very high at scale | Low (favors early) | Medium |
 | **Sigmoid** | Phased (slow → fast → plateau) | Moderate | High | High |
 | **Logarithmic** | Moderate | Decreasing over time | Moderate-High | Medium |
+| **Polynomial** | Configurable (exponent) | Steep at high supply | Depends on n | Medium |
 
 ---
 

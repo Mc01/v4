@@ -3,8 +3,8 @@
 ║            Commonwealth Protocol - Model Test Suite                       ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 
-Tests 4 active models (*YN) defined in MODELS.md:
-- 4 curve types: Constant Product (C), Exponential (E), Sigmoid (S), Logarithmic (L)
+Tests 7 active models (*YN) defined in MODELS.md:
+- 5 curve types: Constant Product (C), Exponential (E), Sigmoid (S), Logarithmic (L), Polynomial (P)
 - 4 fixed invariants:
   - Token Inflation = always yes
   - Buy/Sell impacts price = always yes
@@ -12,7 +12,7 @@ Tests 4 active models (*YN) defined in MODELS.md:
   - LP -> Price = always no
 
 Usage:
-    python test_model.py                  # Compare 4 active *YN models
+    python test_model.py                  # Compare 7 active *YN models
     python test_model.py CYN              # Detailed scenarios for one model
     python test_model.py CYN,EYN,SYN      # Compare specific models
     python test_model.py --all            # Include archived models
@@ -46,7 +46,9 @@ from .scenarios import (
     late_180_scenario,
     partial_lp_scenario,
     whale_scenario,
+    reverse_whale_scenario,
     real_life_scenario,
+    stochastic_scenario,
 )
 
 
@@ -82,7 +84,9 @@ def run_comparison(codenames: list[str]) -> None:
             "late_180": late_180_scenario(code, verbosity=0),
             "partial": partial_lp_scenario(code, verbosity=0),
             "whale": whale_scenario(code, verbosity=0),
+            "rwhale": reverse_whale_scenario(code, verbosity=0),
             "real": real_life_scenario(code, verbosity=0),
+            "stochastic": stochastic_scenario(code, verbosity=0),
         }
     
     print(f"\r{' ' * 30}\r", end="")
@@ -91,13 +95,10 @@ def run_comparison(codenames: list[str]) -> None:
     # │                            Formatters                                 │
     # └───────────────────────────────────────────────────────────────────────┘
 
-    curve_abbr = {"Constant Product": "CP", "Exponential": "Exp", "Sigmoid": "Sig", "Logarithmic": "Log"}
-    
     def fmt_profit(val: D, width: int = 7, decimals: int = 0) -> str:
-        """Format profit with color and underscore separators."""
+        """Format profit with color."""
         num = int(val) if decimals == 0 else float(val)
         if decimals == 0:
-            # Format with underscores, then pad to width
             raw = f"{num:,}".replace(",", "_")
             formatted = f"{raw:>{width}}"
         else:
@@ -108,14 +109,14 @@ def run_comparison(codenames: list[str]) -> None:
             return f"{C.RED}{formatted}{C.END}"
         return formatted
     
-    def fmt_losers(n: int, width: int = 2) -> str:
+    def fmt_losers(n: int, width: int = 1) -> str:
         formatted = f"{n:>{width}d}"
         if n > 0:
             return f"{C.RED}{formatted}{C.END}"
         return formatted
     
-    def fmt_vault(val: D, width: int = 6) -> str:
-        """Format vault with color and underscore separators."""
+    def fmt_vault(val: D, width: int = 5) -> str:
+        """Format vault with color."""
         displayed = round(float(val))
         raw = f"{displayed:,}".replace(",", "_")
         formatted = f"{raw:>{width}}"
@@ -133,34 +134,28 @@ def run_comparison(codenames: list[str]) -> None:
     print(f"{C.BOLD}{C.HEADER}{'='*60}{C.END}")
     print()
     
-    # Column headers: model codename with curve abbreviation
-    model_hdrs: list[str] = []
+    # Sub-column widths: +(gains) -(losses) #(losers) V(vault) — compact
+    GAIN_W, LOSS_W, NUM_W, VLT_W = 7, 7, 1, 6
+    # Cell = 1 + GAIN_W + 1 + LOSS_W + 1 + NUM_W + 1 + VLT_W + 1 = 26
+    CELL_W = 1 + GAIN_W + 1 + LOSS_W + 1 + NUM_W + 1 + VLT_W + 1
+    SCN_W = 10  # Scenario label width
+    
+    hdr = f"  {'Scenario':<{SCN_W}}│"
     for code in codenames:
-        cfg = MODELS[code]
-        curve = curve_abbr.get(CURVE_NAMES[cfg["curve"]], "?")
-        model_hdrs.append(f"{code}({curve})")
-    
-    # Sub-column widths: +(gains) -(losses) #(losers) V(vault)
-    GAIN_W, LOSS_W, NUM_W, VLT_W = 7, 7, 2, 6
-    # Cell width = 1(space) + GAIN_W + 2(spaces) + LOSS_W + 2(spaces) + NUM_W + 2(spaces) + VLT_W + 1(space)
-    CELL_W = 1 + GAIN_W + 2 + LOSS_W + 2 + NUM_W + 2 + VLT_W + 1  # = 30
-    
-    hdr = f"  {'Scenario':<12}│"
-    for mh in model_hdrs:
-        hdr += f"{mh:^{CELL_W}}│"
+        hdr += f"{code:^{CELL_W}}│"
     print(hdr)
 
-    hdr_sep = f"  {'─'*12}┼"
+    hdr_sep = f"  {'─'*SCN_W}┼"
     for _ in codenames:
         hdr_sep += f"{'─'*CELL_W}┼"
     print(hdr_sep)
 
-    sub_hdr = f"  {'Stats':<12}│"
+    sub_hdr = f"  {'':>{SCN_W}}│"
     for _ in codenames:
-        sub_hdr += f" {C.CYAN}{'+':{f'>{GAIN_W}'}}  {'-':{f'>{LOSS_W}'}}  {'#':{f'>{NUM_W}'}}  {'V':{f'>{VLT_W}'}}{C.END} │"
+        sub_hdr += f" {C.CYAN}{'+':{f'>{GAIN_W}'}} {'-':{f'>{LOSS_W}'}} {'#':{f'>{NUM_W}'}} {'V':{f'>{VLT_W}'}}{C.END} │"
     print(sub_hdr)
     
-    sep = f"  {'─'*12}┼"
+    sep = f"  {'─'*SCN_W}┼"
     for _ in codenames:
         sep += f"{'─'*CELL_W}┼"
     print(sep)
@@ -170,36 +165,36 @@ def run_comparison(codenames: list[str]) -> None:
     # └───────────────────────────────────────────────────────────────────────┘
 
     scenarios = [
-        ("single", "Single", False),       # solo user — no losers column
-        ("multi", "Multi", True),           # group scenarios show gain/loss/losers/vault
+        ("single", "Single", False),
+        ("multi", "Multi", True),
         ("rmulti", "Multi R", True),
         ("bank", "Bank", True),
         ("rbank", "Bank R", True),
-        ("hold_before", "Hold Before", True),
-        ("hold_with", "Hold With", True),
-        ("hold_after", "Hold After", True),
+        ("hold_before", "Hold Bfr", True),
+        ("hold_with", "Hold Wth", True),
+        ("hold_after", "Hold Aft", True),
         ("late_90", "Late 90d", True),
-        ("late_180", "Late 180d", True),
-        ("partial", "Partial LP", True),
+        ("late_180", "Late 180", True),
+        ("partial", "PartialLP", True),
         ("whale", "Whale", True),
-        ("real", "Real Life", True),
+        ("rwhale", "Whale R", True),
+        ("real", "RealLife", True),
+        ("stochastic", "Stochastc", True),
     ]
     
     for scenario_key, scenario_label, is_group in scenarios:
-        row = f"  {scenario_label:<12}│"
+        row = f"  {scenario_label:<{SCN_W}}│"
 
         for code in codenames:
             result = model_results[code][scenario_key]
 
             if not is_group:
-                # Single user: profit in gain column, dashes for loss/losers
                 r = cast(SingleUserResult, result)
                 profit = r["profit"]
                 g = fmt_profit(profit, GAIN_W, 1)
                 v = fmt_vault(r["vault_remaining"], VLT_W)
-                row += f" {g}  {C.DIM}{'-':>{LOSS_W}}  {'-':>{NUM_W}}{C.END}  {v} │"
+                row += f" {g} {C.DIM}{'-':>{LOSS_W}} {'-':>{NUM_W}}{C.END} {v} │"
             else:
-                # Group scenarios: aggregate gains, losses, loser count
                 r = cast(Union[MultiUserResult, BankRunResult], result)
                 profits = list(r["profits"].values())
                 plus = sum((p for p in profits if p > 0), D(0))
@@ -211,7 +206,7 @@ def run_comparison(codenames: list[str]) -> None:
                 l = fmt_profit(minus, LOSS_W)
                 n = fmt_losers(losers, NUM_W)
                 v = fmt_vault(r["vault"], VLT_W)
-                row += f" {g}  {l}  {n}  {v} │"
+                row += f" {g} {l} {n} {v} │"
 
         print(row)
     
@@ -233,7 +228,7 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python test_model.py                    # Compare 4 active *YN models (table view)
+  python test_model.py                    # Compare 7 active *YN models (table view)
   python test_model.py CYN                # All scenarios for one model (verbose)
   python test_model.py CYN,EYN,SYN        # Compare specific models (table view)
   python test_model.py --all              # Include all 16 models (incl. archived)
@@ -246,7 +241,9 @@ Examples:
   python test_model.py --late CYN         # Late entrant scenario (first-mover advantage)
   python test_model.py --partial CYN      # Partial LP scenario (mixed strategies)
   python test_model.py --whale CYN        # Whale entry scenario (concentration/slippage)
+  python test_model.py --rwhale CYN       # Reverse whale (whale exits first)
   python test_model.py --real CYN         # Real life scenario (continuous flow)
+  python test_model.py --stochastic CYN   # Stochastic scenario (random arrivals)
 """
     )
     parser.add_argument(
@@ -294,8 +291,16 @@ Examples:
         help="Run whale entry scenario (concentration/slippage test)"
     )
     parser.add_argument(
+        "--rwhale", action="store_true",
+        help="Run reverse whale scenario (whale exits first)"
+    )
+    parser.add_argument(
         "--real", action="store_true",
         help="Run real life scenario (continuous entry/exit flow)"
+    )
+    parser.add_argument(
+        "--stochastic", action="store_true",
+        help="Run stochastic scenario (random arrivals over time)"
     )
     parser.add_argument(
         "-v", "--verbose", action="count", default=0,
@@ -331,10 +336,13 @@ Examples:
     run_late = args.late
     run_partial = args.partial
     run_whale = args.whale
+    run_rwhale = args.rwhale
     run_real = args.real
+    run_stochastic = args.stochastic
     
     any_flag = (run_single or run_multi or run_bank or run_rmulti or run_rbank or
-                run_hold or run_late or run_partial or run_whale or run_real)
+                run_hold or run_late or run_partial or run_whale or run_rwhale or
+                run_real or run_stochastic)
     run_all = not any_flag
     
     verbose = len(codes) == 1
@@ -388,6 +396,14 @@ Examples:
         for code in codes:
             whale_scenario(code, verbosity=v)
 
+    if args.rwhale:
+        for code in codes:
+            reverse_whale_scenario(code, verbosity=v)
+
     if args.real:
         for code in codes:
             real_life_scenario(code, verbosity=v)
+
+    if args.stochastic:
+        for code in codes:
+            stochastic_scenario(code, verbosity=v)

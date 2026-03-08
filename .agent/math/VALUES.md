@@ -101,7 +101,9 @@ Profit:    13.79 USDC
 
 ---
 
-## Multi-User Scenario — Actual Results
+## Multi-User Scenario — Pre-FIX Historical Results
+
+> **Note**: These results were captured before FIX 1 + FIX 4. Current vault residuals are 0 for all models across all scenarios.
 
 Setup: 5 users, 500 USDC each, sequential buy+LP, 100 days compound, FIFO exit.
 
@@ -118,7 +120,9 @@ EYN net profit (+51) matches expected (+51.72). Exit order creates winners/loser
 
 ---
 
-## Bank Run Scenario — Actual Results
+## Bank Run Scenario — Pre-FIX Historical Results
+
+> **Note**: These results were captured before FIX 1 + FIX 4. Current vault residuals are 0 for all models.
 
 Setup: 10 users, 365 days compound, sequential panic exit.
 

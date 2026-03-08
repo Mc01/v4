@@ -55,8 +55,9 @@ def test_price_stays_positive(model: str):
     assert lp.price > D(0), f"Price not positive after buy: {lp.price}"
 
     lp.sell(user, user.balance_token)
-    if model == "LYN":
-        # Logarithmic curve: price = base * ln(1 + k*supply). At supply=0, ln(1)=0.
+    if lp.curve_type.value == "L" or lp.curve_type.value == "P":
+        # Logarithmic: price = base * ln(1 + k*supply). At supply=0, ln(1)=0.
+        # Polynomial: price = base * k * supply^n. At supply=0, 0^n=0.
         assert lp.price >= D(0), f"Price went negative after sell: {lp.price}"
     else:
         assert lp.price > D(0), f"Price not positive after sell: {lp.price}"

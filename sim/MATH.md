@@ -138,7 +138,7 @@ price = curve_price(supply, buy_usdc_with_yield)
 
 ## Price Multiplier Mechanism (Integral Curves)
 
-For integral curves (EYN, SYN, LYN), the bonding curve operates on a "base" price function. When yield impacts price, the actual USDC amounts are scaled by a **price multiplier**:
+For integral curves (EYN, SYN, LYN, PYN), the bonding curve operates on a "base" price function. When yield impacts price, the actual USDC amounts are scaled by a **price multiplier**:
 
 ```
 effective_usdc = buy_usdc * (vault_balance / total_principal)   # yield-adjusted
@@ -301,6 +301,40 @@ cost = F(b) - F(a)
 
 ---
 
+### Polynomial
+
+Price grows as a power of supply. The exponent `n` controls steepness — sub-quadratic (n=1.5) to super-quadratic (n=2.5). Flexible curve family that generalizes between linear and exponential behavior.
+
+**High-level:**
+```
+price(s) = base_price * k * s^n
+
+buy_cost(s, tokens) = integral from s to s+tokens of base_price * k * x^n dx
+                   = base_price * k * ((s+tokens)^(n+1) - s^(n+1)) / (n+1)
+```
+
+**Exact formulas:**
+```
+p(s) = P₀ · k · sⁿ                                    # price at supply s
+
+∫ₐᵇ P₀ · k · xⁿ dx = P₀ · k · (bⁿ⁺¹ - aⁿ⁺¹) / (n+1)  # cost from a to b
+```
+
+**Copyable (Python/code):**
+```python
+price = P0 * k * s ** n
+cost = P0 * k * (b ** (n + 1) - a ** (n + 1)) / (n + 1)
+```
+
+| ✅ Strengths | ❌ Weaknesses |
+|-------------|---------------|
+| Configurable growth via exponent | p(0) = 0 — first tokens are free |
+| Predictable power-law dynamics | Steep at high supply for n > 2 |
+| No overflow risk (unlike EXP) | Fractional exponents need clamping for s < 0 |
+| Good middle ground | Less capital-efficient than CP |
+
+---
+
 ## Token Inflation (Fixed Invariant)
 
 All models mint new tokens for LPs at 5% APY on tokens provided as liquidity.
@@ -382,6 +416,7 @@ Curve-specific constants (vary per implementation):
 | Exponential | `P₀ = 1`, `k = 0.0002` (growth rate) |
 | Sigmoid | `Pₘₐₓ = 2`, `k = 0.001` (steepness), `m = 0` (midpoint) |
 | Logarithmic | `P₀ = 1`, `k = 0.01` (scaling factor) |
+| Polynomial | `P₀ = 1`, `k = 0.000001`, `n = 1.5/2/2.5` (exponent) |
 
 ---
 
@@ -393,3 +428,4 @@ Curve-specific constants (vary per implementation):
 | Exponential | `P₀ · eᵏˢ` | `(P₀/k) · (eᵏᵇ - eᵏᵃ)` |
 | Sigmoid | `Pₘₐₓ / (1 + e⁻ᵏ⁽ˢ⁻ᵐ⁾)` | `(Pₘₐₓ/k) · [ln(1+eᵏ⁽ᵇ⁻ᵐ⁾) - ln(1+eᵏ⁽ᵃ⁻ᵐ⁾)]` |
 | Logarithmic | `P₀ · ln(1+ks)` | `F(b) - F(a)` where `F(x) = P₀·[(u·ln(u)-u)/k + x]` |
+| Polynomial | `P₀ · k · sⁿ` | `P₀ · k · (bⁿ⁺¹ - aⁿ⁺¹) / (n+1)` |

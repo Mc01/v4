@@ -59,7 +59,7 @@ flowchart LR
 The `sim/` directory contains Python models that simulate the protocol under various configurations. The purpose is to **validate math and choose the correct model** before writing Solidity contracts.
 
 Each model is defined by its **bonding curve type**:
-- **Constant Product** (CYN), **Exponential** (EYN), **Sigmoid** (SYN), **Logarithmic** (LYN)
+- **Constant Product** (CYN), **Exponential** (EYN), **Sigmoid** (SYN), **Logarithmic** (LYN), **Polynomial** (P15YN, P20YN, P25YN)
 
 Fixed invariants across all models:
 - **Yield → Price = Yes** — vault compounding grows token price
@@ -73,14 +73,20 @@ See [MODELS.md](sim/MODELS.md) for the full model matrix and [MATH.md](sim/MATH.
 ## How to Run
 
 ```bash
-# Run the default scenario (whale scenario across all models)
-python3 sim/run_model.py
+# Run comparison table (all 7 active models × all scenarios)
+./run_sim.sh
 
-# Run tests
+# Run a specific model
+./run_sim.sh CYN
+
+# Run specific scenario
+./run_sim.sh --whale CYN
+./run_sim.sh --bank
+./run_sim.sh --rwhale           # Reverse whale (whale exits first)
+./run_sim.sh --stochastic       # Stochastic arrivals (seeded RNG)
+
+# Run full test suite (434 tests, 7 modules)
 python3 -m sim.test.run_all
-
-# Run yield accounting test
-python3 sim/test/test_yield_accounting.py
 ```
 
 ---

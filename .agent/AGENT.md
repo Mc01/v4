@@ -41,6 +41,7 @@ Commonwealth is a yield-bearing LP token protocol. Users buy tokens with USDC, p
 | **Price Multiplier** | `effective_usdc / buy_usdc` — how yield scales integral curve prices |
 | **Fair Share Cap** | Limits withdrawals to proportional vault share (prevents bank runs) |
 | **CYN/EYN/SYN/LYN** | Active models: [C]onstant/[E]xp/[S]igmoid/[L]og + [Y]ield->Price + [N]o LP->Price |
+| **P15YN/P20YN/P25YN** | Polynomial variants: exponent n=1.5/2.0/2.5 + [Y]ield->Price + [N]o LP->Price |
 
 ---
 

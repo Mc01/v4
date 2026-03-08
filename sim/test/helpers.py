@@ -3,7 +3,7 @@
 ║                     Test Helpers - Shared Utilities                       ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 """
-from typing import List, Callable, Tuple
+from typing import Callable
 
 from ..core import ACTIVE_MODELS
 
@@ -16,7 +16,7 @@ class TestResults:
         self.total = 0
         self.passed = 0
         self.failed = 0
-        self.failures: List[Tuple[str, str, str]] = []
+        self.failures: list[tuple[str, str, str]] = []
     
     def record_pass(self, model: str, test_name: str):
         self.total += 1

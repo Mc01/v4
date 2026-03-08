@@ -54,7 +54,7 @@ This is the mechanism for distributing the "common yield." Without it, LPs only 
 
 ## Model Architecture
 
-Four bonding curves, all sharing the same invariants:
+Five bonding curves, all sharing the same invariants:
 
 | Invariant | Value | Why |
 |-----------|-------|-----|
@@ -63,7 +63,7 @@ Four bonding curves, all sharing the same invariants:
 | Token Inflation | Yes | LPs earn minted tokens (configurable rate) |
 | Buy/Sell -> Price | Yes | Core price discovery mechanism |
 
-Active models: **CYN** (Constant Product), **EYN** (Exponential), **SYN** (Sigmoid), **LYN** (Logarithmic). See [../sim/MODELS.md](../sim/MODELS.md).
+Active models: **CYN** (Constant Product), **EYN** (Exponential), **SYN** (Sigmoid), **LYN** (Logarithmic), **P15YN/P20YN/P25YN** (Polynomial n=1.5/2/2.5). See [../sim/MODELS.md](../sim/MODELS.md).
 
 ### Two Yield Channels Operate Simultaneously
 

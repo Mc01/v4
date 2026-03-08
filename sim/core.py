@@ -53,6 +53,7 @@ class CurveConfig:
     k: D
     max_price: D = D(0)    # Only used by sigmoid
     midpoint: D = D(0)     # Only used by sigmoid
+    exponent: D = D(2)     # Only used by polynomial (default = quadratic)
 
 # Calibrated for ~500 USDC test buys
 EXP_CFG = CurveConfig(base_price=D(1), k=D("0.0002"))          # → ~477 tokens
@@ -75,8 +76,14 @@ STRICT_MODE = False
 # Disable virtual liquidity for isolation testing
 DISABLE_VIRTUAL_LIQUIDITY = False
 
+# Polynomial: p(s) = base_price * k * s^n  (n=exponent, default=2 for quadratic)
+POLY_CFG = CurveConfig(base_price=D(1), k=D("0.000001"), exponent=D(2))
+POLY_BASE_PRICE = POLY_CFG.base_price
+POLY_K = POLY_CFG.k
+POLY_EXPONENT = POLY_CFG.exponent
+
 # Binary search precision for integral curves
-BISECT_ITERATIONS = 200  # Increased from 100 for better precision
+BISECT_ITERATIONS = 200
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -88,25 +95,28 @@ class CurveType(Enum):
     EXPONENTIAL = "E"
     SIGMOID = "S"
     LOGARITHMIC = "L"
+    POLYNOMIAL = "P"
 
 CURVE_NAMES: dict[CurveType, str] = {
     CurveType.CONSTANT_PRODUCT: "Constant Product",
     CurveType.EXPONENTIAL: "Exponential",
     CurveType.SIGMOID: "Sigmoid",
     CurveType.LOGARITHMIC: "Logarithmic",
+    CurveType.POLYNOMIAL: "Polynomial",
 }
 
 
-class ModelConfig(TypedDict):
+class ModelConfig(TypedDict, total=False):
     curve: CurveType
     yield_impacts_price: bool
     lp_impacts_price: bool
     deprecated: bool
+    poly_exponent: D  # Only for CurveType.POLYNOMIAL
 
 # ┌───────────────────────────────────────────────────────────────────────────┐
-# │ Auto-generate all 16 combinations (4 curves x 2 yield flags x 2 LP flags) │
-# │ Active models: *YN (Yield->Price=Yes, LP->Price=No).                      │
-# │ Archived: *YY, *NY, *NN (kept for backwards compatibility).               │
+# │ Auto-generate 16 combinations (4 base curves x 2 yield x 2 LP flags)  │
+# │ Active: *YN. Archived: *YY, *NY, *NN.                                 │
+# │ Polynomial variants added manually below (3 exponents).               │
 # └───────────────────────────────────────────────────────────────────────────┘
 
 MODELS: dict[str, ModelConfig] = {
@@ -123,6 +133,14 @@ MODELS: dict[str, ModelConfig] = {
         [("Y", True), ("N", False)],
     )
 }
+
+# Polynomial exponent variants (active only, not auto-generated)
+# Each gets its own model code: P15=n^1.5, P20=n^2, P25=n^2.5
+for _code, _exp in [("P15", D("1.5")), ("P20", D(2)), ("P25", D("2.5"))]:
+    MODELS[f"{_code}YN"] = {
+        "curve": CurveType.POLYNOMIAL, "yield_impacts_price": True,
+        "lp_impacts_price": False, "deprecated": False, "poly_exponent": _exp,
+    }
 
 ACTIVE_MODELS: list[str] = [code for code, cfg in MODELS.items() if not cfg["deprecated"]]
 
@@ -218,13 +236,14 @@ class Vault:
 
 
 # ┌─────────────────────────────────────┐
-# │          UserSnapshot               │
+# │          Snapshot               │
 # └─────────────────────────────────────┘
 
-@dataclass(frozen=True)
-class UserSnapshot:
-    """Records the compounding index when a user adds liquidity (for yield delta)."""
-    index: D
+    @dataclass(frozen=True)
+    class Snapshot:
+        """Records the compounding index when a user adds liquidity (for yield delta)."""
+        index: D
+
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -305,6 +324,34 @@ def _log_price(s: D) -> D:
 
 
 # ┌─────────────────────────────────────┐
+# │       Polynomial Curve              │
+# └─────────────────────────────────────┘
+
+def _poly_integral(a: D, b: D, *, exponent: D = POLY_EXPONENT) -> D:
+    """Integral of base_price * k * x^n from a to b.
+
+    = base_price * k * (b^(n+1) - a^(n+1)) / (n+1)
+
+    Guards: For fractional exponents (e.g., 1.5, 2.5), Decimal raises
+    InvalidOperation on negative bases. Floor to 0 if supply goes negative.
+    """
+    n1 = exponent + D(1)
+    # Fractional exponents cannot handle negative bases in Decimal
+    a_clamped = max(a, D(0))
+    b_clamped = max(b, D(0))
+    return POLY_BASE_PRICE * POLY_K * (b_clamped ** n1 - a_clamped ** n1) / n1
+
+def _poly_price(s: D, *, exponent: D = POLY_EXPONENT) -> D:
+    """Polynomial spot price: base_price * k * s^n.
+
+    Returns 0 for s <= 0 (guard for fractional exponents).
+    """
+    if s <= D(0):
+        return D(0)
+    return POLY_BASE_PRICE * POLY_K * s ** exponent
+
+
+# ┌─────────────────────────────────────┐
 # │     Binary Search for Tokens        │
 # └─────────────────────────────────────┘
 
@@ -338,6 +385,7 @@ _CURVE_DISPATCH: dict[CurveType, tuple[Callable[[D, D], D], Callable[[D], D]]] =
     CurveType.EXPONENTIAL:  (_exp_integral, _exp_price),
     CurveType.SIGMOID:      (_sig_integral, _sig_price),
     CurveType.LOGARITHMIC:  (_log_integral, _log_price),
+    CurveType.POLYNOMIAL:   (_poly_integral, _poly_price),
 }
 
 
@@ -348,19 +396,21 @@ _CURVE_DISPATCH: dict[CurveType, tuple[Callable[[D, D], D], Callable[[D], D]]] =
 # ║   - yield_impacts_price: vault compounding growth feeds back into price   ║
 # ║   - lp_impacts_price: LP deposits contribute to effective USDC for pricing║
 # ║                                                                           ║
-# ║ Supports 4 bonding curve types. Constant Product uses virtual reserves;   ║
-# ║ Exponential/Sigmoid/Logarithmic use integral math with a price multiplier.║
+# ║ Supports 5 bonding curve types. Constant Product uses virtual reserves;   ║
+# ║ Exponential/Sigmoid/Logarithmic/Polynomial use integral math + multiplier.║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 
 class LP:
     def __init__(self, vault: Vault, curve_type: CurveType,
                  yield_impacts_price: bool, lp_impacts_price: bool,
-                 token_inflation_factor: D = TOKEN_INFLATION_FACTOR):
+                 token_inflation_factor: D = TOKEN_INFLATION_FACTOR,
+                 poly_exponent: Optional[D] = None):
         self.vault = vault
         self.curve_type = curve_type
         self.yield_impacts_price = yield_impacts_price
         self.lp_impacts_price = lp_impacts_price
         self.token_inflation_factor = token_inflation_factor
+        self.poly_exponent = poly_exponent if poly_exponent is not None else POLY_EXPONENT
 
         # Pool balances
         self.balance_usd = D(0)
@@ -371,7 +421,7 @@ class LP:
         self.liquidity_token: dict[str, D] = {}
         self.liquidity_usd: dict[str, D] = {}
         self.user_buy_usdc: dict[str, D] = {}
-        self.user_snapshot: dict[str, UserSnapshot] = {}
+        self.user_snapshot: dict[str, Vault.Snapshot] = {}
 
         # Aggregate USDC tracking — the split is the core of model dimensions:
         # - buy_usdc: always contributes to effective_usdc (price base)
@@ -385,8 +435,21 @@ class LP:
 
         # Curve dispatch: integral and spot price callables (None for CP)
         _dispatch = _CURVE_DISPATCH.get(self.curve_type)
-        self._integral: Optional[Callable[[D, D], D]] = _dispatch[0] if _dispatch else None
-        self._spot_price: Optional[Callable[[D], D]] = _dispatch[1] if _dispatch else None
+        if self.curve_type == CurveType.POLYNOMIAL:
+            # Polynomial: create bound functions with instance-specific exponent
+            exp = self.poly_exponent
+            def _bound_integral(a: D, b: D) -> D:
+                return _poly_integral(a, b, exponent=exp)
+            def _bound_spot(s: D) -> D:
+                return _poly_price(s, exponent=exp)
+            self._integral: Optional[Callable[[D, D], D]] = _bound_integral
+            self._spot_price: Optional[Callable[[D], D]] = _bound_spot
+        elif _dispatch:
+            self._integral = _dispatch[0]
+            self._spot_price = _dispatch[1]
+        else:
+            self._integral = None
+            self._spot_price = None
 
     # ┌───────────────────────────────────────────────────────────────────────┐
     # │                   Dimension-Aware Pricing                             │
@@ -461,8 +524,6 @@ class LP:
         effective = min(self.buy_usdc, VIRTUAL_LIMIT)
         liquidity = base * (D(1) - effective / VIRTUAL_LIMIT)
         
-        # Removed floor_liquidity - it can go negative and causes accounting drift
-        # Virtual liquidity should decay smoothly to zero based only on buy_usdc
         return max(D(0), liquidity)
 
     def _get_token_reserve(self) -> D:
@@ -645,7 +706,7 @@ class LP:
         self.rehypo()
 
         # Snapshot compounding index for yield calculation on removal
-        self.user_snapshot[user.name] = UserSnapshot(self.vault.compounding_index)
+        self.user_snapshot[user.name] = Vault.Snapshot(self.vault.compounding_index)
         self.liquidity_token[user.name] = self.liquidity_token.get(user.name, D(0)) + token_amount
         self.liquidity_usd[user.name] = self.liquidity_usd.get(user.name, D(0)) + usd_amount
 
@@ -682,9 +743,6 @@ class LP:
         token_yield = token_yield_full * scaling_factor
         token_amount = token_deposit + token_yield
         
-        buy_usdc_yield_withdrawn = buy_usdc_yield_full * scaling_factor
-        lp_usdc_yield_withdrawn = usd_yield * scaling_factor
-
         # Mint yield tokens and pull USDC from vault
         self.mint(token_yield)
         self.dehypo(total_usdc)
@@ -760,12 +818,15 @@ def create_model(
     *,
     vault_apy: Optional[D] = None,
     token_inflation_factor: Optional[D] = None,
+    poly_exponent: Optional[D] = None,
 ) -> tuple[Vault, LP]:
     """Create a (Vault, LP) pair for the given model codename.
 
     Optional overrides allow tests to vary parameters without monkeypatching globals.
     """
     cfg = MODELS[codename]
+    # Poly exponent: explicit override > config > global default
+    effective_exponent = poly_exponent or cfg.get("poly_exponent")
     vault = Vault(apy=vault_apy if vault_apy is not None else VAULT_APY)
     lp = LP(
         vault, cfg["curve"], cfg["yield_impacts_price"], cfg["lp_impacts_price"],
@@ -773,6 +834,7 @@ def create_model(
             token_inflation_factor if token_inflation_factor is not None
             else TOKEN_INFLATION_FACTOR
         ),
+        poly_exponent=effective_exponent,
     )
     return vault, lp
 
